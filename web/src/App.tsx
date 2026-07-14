@@ -17,6 +17,7 @@ export default function App() {
   const panel = panelForRoute(route.pathname);
   const workspace = useWorkspaceController();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [openExplorerOnReturn, setOpenExplorerOnReturn] = useState(false);
   const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation | null>(null);
 
   const requestNavigation = useCallback((label: string, proceed: () => void) => {
@@ -34,6 +35,14 @@ export default function App() {
       if (nextPanel !== 'vault') workspace.resetEditor();
       setDrawerOpen(false);
       navigate(nextPath);
+    });
+  }, [requestNavigation, workspace.resetEditor]);
+
+  const closeSettingsToExplorer = useCallback(() => {
+    requestNavigation('返回笔记库', () => {
+      workspace.resetEditor();
+      setOpenExplorerOnReturn(true);
+      navigate('/');
     });
   }, [requestNavigation, workspace.resetEditor]);
 
@@ -57,6 +66,12 @@ export default function App() {
     if (route.pathname !== '/') workspace.resetEditor();
     setDrawerOpen(false);
   }, [route.pathname, workspace.resetEditor]);
+
+  useEffect(() => {
+    if (!openExplorerOnReturn || route.pathname !== '/') return;
+    setDrawerOpen(true);
+    setOpenExplorerOnReturn(false);
+  }, [openExplorerOnReturn, route.pathname]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -109,7 +124,7 @@ export default function App() {
 
   const content = panel === 'vault' ? vaultContent
     : panel === 'sync' ? <SyncPanel sync={workspace.sync} onSync={workspace.runSync} onRefresh={() => void workspace.reload(false)} onError={workspace.setError} />
-      : <RepositorySettings repository={workspace.repository} auth={workspace.auth} readerFontSize={workspace.clientSettings.readerFontSize} onReaderFontSizeChange={workspace.setReaderFontSize} onDisconnect={workspace.disconnect} onClose={() => navigateToPanel('vault')} />;
+      : <RepositorySettings repository={workspace.repository} auth={workspace.auth} readerFontSize={workspace.clientSettings.readerFontSize} onReaderFontSizeChange={workspace.setReaderFontSize} onDisconnect={workspace.disconnect} onClose={closeSettingsToExplorer} />;
 
   const pendingPrompt = pendingNavigation && <UnsavedChangesPrompt
     label={pendingNavigation.label}
