@@ -32,6 +32,12 @@ export class RepositoryService {
     return normalized;
   }
 
+  clear() {
+    setSetting(this.database.db, 'repository', '');
+    setSetting(this.database.db, 'repository_branch', '');
+    setSetting(this.database.db, 'repository_initialized', '0');
+  }
+
   setBranch(value: string) {
     setSetting(this.database.db, 'repository_branch', value);
   }

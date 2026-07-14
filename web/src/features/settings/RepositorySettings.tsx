@@ -1,6 +1,9 @@
-import { Github, SlidersHorizontal, Type } from 'lucide-react';
+import { useState } from 'react';
+import { ArrowLeft, ChevronRight, CircleHelp, Github, Info, SlidersHorizontal, Type, X } from 'lucide-react';
 import type { GitHubAuth } from '../../api';
 import { defaultClientSettings } from '../../app/constants';
+
+type SettingsPage = 'menu' | 'reader' | 'repository' | 'about';
 
 type RepositorySettingsProps = {
   repository: string;
@@ -8,12 +11,96 @@ type RepositorySettingsProps = {
   readerFontSize: number;
   onReaderFontSizeChange: (value: number) => void;
   onDisconnect: () => Promise<void>;
+  onClose: () => void;
 };
 
-export default function RepositorySettings({ repository, auth, readerFontSize, onReaderFontSizeChange, onDisconnect }: RepositorySettingsProps) {
-  return <section className="settings-view">
-    <header className="settings-header"><span className="utility-icon"><SlidersHorizontal size={22} /></span><div><h1>设置</h1><p>阅读偏好保存在此浏览器；仓库授权保存在本机服务。</p></div></header>
-    <section className="settings-section"><div className="settings-section-heading"><span className="settings-section-icon"><Type size={17} /></span><div><h2>阅读</h2><p>只调整文章正文，不影响标题栏、按钮和编辑器。</p></div></div><label className="reader-size-control"><span>正文大小 <output>{readerFontSize} px</output></span><input type="range" min="14" max="20" step="1" value={readerFontSize} onChange={(event) => onReaderFontSizeChange(Number(event.target.value))} aria-label="文章正文字号" /><div><small>更紧凑</small><button type="button" onClick={() => onReaderFontSizeChange(defaultClientSettings.readerFontSize)}>恢复默认</button><small>更宽松</small></div></label></section>
-    <section className="settings-section"><div className="settings-section-heading"><span className="settings-section-icon"><Github size={17} /></span><div><h2>GitHub 仓库</h2><p>已连接 <strong>{auth.login}</strong> · <code>{repository}</code></p></div></div><div className="settings-actions"><button type="button" className="delete-action" onClick={() => void onDisconnect()}>断开 GitHub</button></div></section>
+type SettingsMenuItemProps = {
+  icon: typeof Type;
+  title: string;
+  onClick: () => void;
+};
+
+function SettingsMenuItem({ icon: Icon, title, onClick }: SettingsMenuItemProps) {
+  return <button type="button" className="settings-menu-item" onClick={onClick}>
+    <span className="settings-menu-icon"><Icon size={20} strokeWidth={1.8} /></span>
+    <span className="settings-menu-copy"><strong>{title}</strong></span>
+    <ChevronRight className="settings-menu-chevron" size={19} strokeWidth={1.8} />
+  </button>;
+}
+
+function SettingsPageHeader({ title, onBack, onClose }: { title: string; onBack?: () => void; onClose: () => void }) {
+  return <header className="settings-page-header">
+    {onBack && <button type="button" className="settings-header-action settings-back-action" onClick={onBack} aria-label="返回设置"><ArrowLeft size={21} /></button>}
+    <h1>{title}</h1>
+    <button type="button" className="settings-header-action" onClick={onClose} aria-label="关闭设置"><X size={21} /></button>
+  </header>;
+}
+
+export default function RepositorySettings({ repository, auth, readerFontSize, onReaderFontSizeChange, onDisconnect, onClose }: RepositorySettingsProps) {
+  const [page, setPage] = useState<SettingsPage>('menu');
+  const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+
+  const confirmDisconnect = async () => {
+    setDisconnecting(true);
+    try {
+      await onDisconnect();
+    } finally {
+      setDisconnecting(false);
+    }
+  };
+
+  const goBack = () => {
+    setConfirmingDisconnect(false);
+    setPage('menu');
+  };
+
+  if (page === 'menu') return <section className="settings-view settings-menu-view">
+    <SettingsPageHeader title="设置" onClose={onClose} />
+    <div className="settings-menu-content">
+      <p className="settings-group-label">选项</p>
+      <nav className="settings-menu-list" aria-label="设置选项">
+        <SettingsMenuItem icon={Type} title="阅读与编辑" onClick={() => setPage('reader')} />
+        <SettingsMenuItem icon={Github} title="仓库与同步" onClick={() => setPage('repository')} />
+        <SettingsMenuItem icon={Info} title="关于 NoteAI" onClick={() => setPage('about')} />
+      </nav>
+    </div>
+  </section>;
+
+  if (page === 'reader') return <section className="settings-view settings-detail-view">
+    <SettingsPageHeader title="阅读与编辑" onBack={goBack} onClose={onClose} />
+    <main className="settings-detail-content">
+      <p className="settings-group-label">阅读</p>
+      <section className="settings-detail-group">
+        <div className="settings-detail-heading"><span className="settings-menu-icon"><Type size={20} strokeWidth={1.8} /></span><div><h2>正文字号</h2><p>只影响文章阅读页，不影响编辑器。</p></div><output>{readerFontSize}<small>px</small></output></div>
+        <label className="reader-size-control"><input type="range" min="14" max="20" step="1" value={readerFontSize} onChange={(event) => onReaderFontSizeChange(Number(event.target.value))} aria-label="文章正文字号" /><span><small>紧凑</small><button type="button" onClick={() => onReaderFontSizeChange(defaultClientSettings.readerFontSize)}>恢复默认</button><small>宽松</small></span></label>
+      </section>
+    </main>
+  </section>;
+
+  if (page === 'repository') return <section className="settings-view settings-detail-view">
+    <SettingsPageHeader title="仓库与同步" onBack={goBack} onClose={onClose} />
+    <main className="settings-detail-content">
+      <p className="settings-group-label">当前连接</p>
+      <section className="settings-detail-group">
+        <div className="settings-detail-row"><span>GitHub 账户</span><strong>{auth.login}</strong></div>
+        <div className="settings-detail-row"><span>笔记仓库</span><code>{repository}</code></div>
+      </section>
+      <p className="settings-group-label settings-danger-label">危险操作</p>
+      <section className="settings-detail-group settings-danger-group">
+        {!confirmingDisconnect ? <><div className="settings-detail-heading"><span className="settings-menu-icon"><Github size={20} strokeWidth={1.8} /></span><div><h2>断开 GitHub</h2><p>移除当前服务与 GitHub 的连接。</p></div></div><button type="button" className="settings-danger-trigger" onClick={() => setConfirmingDisconnect(true)}>断开连接</button></> : <div className="disconnect-confirmation" role="alert">
+          <CircleHelp size={20} strokeWidth={1.8} />
+          <div><h2>确认断开连接？</h2><p>断开后会清除当前服务已同步的本机内容、待同步修改和冲突记录。GitHub 仓库中的内容不会被删除。</p><div className="disconnect-confirmation-actions"><button type="button" className="settings-quiet-button" disabled={disconnecting} onClick={() => setConfirmingDisconnect(false)}>取消</button><button type="button" className="settings-danger-button" disabled={disconnecting} onClick={() => void confirmDisconnect()}>{disconnecting ? '正在断开…' : '清除并断开'}</button></div></div>
+        </div>}
+      </section>
+    </main>
+  </section>;
+
+  return <section className="settings-view settings-detail-view">
+    <SettingsPageHeader title="关于 NoteAI" onBack={goBack} onClose={onClose} />
+    <main className="settings-detail-content">
+      <p className="settings-group-label">NoteAI</p>
+      <section className="settings-detail-group about-settings-group"><div className="settings-detail-heading"><span className="settings-menu-icon"><SlidersHorizontal size={20} strokeWidth={1.8} /></span><div><h2>本地优先的笔记体验</h2><p>使用 GitHub 仓库同步 Markdown 文件，阅读、编辑和同步状态始终清晰可见。</p></div></div><div className="settings-detail-row"><span>版本</span><strong>0.1.0</strong></div></section>
+    </main>
   </section>;
 }

@@ -55,4 +55,8 @@ export class FileStoreService {
   async remove(path: string) {
     await fs.rm(this.file(path), { force: true });
   }
+
+  async clear() {
+    await fs.rm(this.storePath(), { recursive: true, force: true });
+  }
 }

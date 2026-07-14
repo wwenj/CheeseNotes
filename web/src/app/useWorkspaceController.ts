@@ -187,7 +187,7 @@ export function useWorkspaceController() {
   const disconnect = useCallback(async () => {
     try {
       setAuth(await githubApi.disconnect());
-      setNotice('已断开 GitHub，本地缓存和待同步修改已保留。');
+      setNotice('已断开 GitHub，并清除了当前服务同步的本机内容。');
       await reload(false);
     } catch (reason) {
       setError(messageOf(reason));

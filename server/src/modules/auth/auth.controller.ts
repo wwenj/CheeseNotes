@@ -47,7 +47,9 @@ export class AuthController {
   }
 
   @Delete()
-  disconnect() {
+  async disconnect() {
+    await this.sync.clearWorkspace();
+    this.repository.clear();
     this.oauth.disconnect();
     return this.oauth.status(this.repository.get());
   }

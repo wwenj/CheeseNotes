@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { GitHubService, OAuthService, PathPolicy, RepositoryService, SyncService, type DatabaseService } from '../src/services.js';
+import { GitHubService, OAuthService, PathPolicy, RepositoryService, SyncService, type DatabaseService, type FileStoreService } from '../src/services.js';
 
 const makeDatabaseService = () => {
   const db = new Database(':memory:');
@@ -21,6 +21,17 @@ describe('RepositoryService', () => {
   it('拒绝非 GitHub 仓库地址', () => {
     const repository = new RepositoryService(makeDatabaseService());
     expect(() => repository.set('https://example.com/a/b')).toThrow('请输入 owner/repo');
+  });
+
+  it('清空仓库连接信息', () => {
+    const repository = new RepositoryService(makeDatabaseService());
+    repository.set('wwenj/myNote');
+    repository.setBranch('main');
+    repository.markInitialized();
+    repository.clear();
+    expect(repository.get()).toBe('');
+    expect(repository.branch()).toBe('');
+    expect(repository.initialized()).toBe(false);
   });
 });
 
@@ -71,5 +82,23 @@ describe('PathPolicy and SyncService', () => {
     const github = new GitHubService(dbs);
     const sync = new SyncService(dbs, path, repository, github);
     expect(sync.triggerSync().state).toBe('unconfigured');
+  });
+
+  it('断开前会清除本机同步内容与同步状态', async () => {
+    const dbs = makeDatabaseService();
+    const path = new PathPolicy();
+    const repository = new RepositoryService(dbs);
+    const github = new GitHubService(dbs);
+    const files = { clear: vi.fn().mockResolvedValue(undefined) } as unknown as FileStoreService;
+    const sync = new SyncService(dbs, path, repository, github, files);
+    dbs.db.prepare('INSERT INTO notes(path,revision,updated_at,remote_sha) VALUES(?,?,?,?)').run('笔记.md', '1', 'now', 'sha');
+    dbs.db.prepare('INSERT INTO pending(path,op,base_commit,base_blob,base_content,local_content,updated_at) VALUES(?,?,?,?,?,?,?)').run('笔记.md', 'update', '', '', '', '内容', 'now');
+    dbs.db.prepare('INSERT INTO conflicts(id,path,base_content,local_content,remote_content,remote_commit,created_at) VALUES(?,?,?,?,?,?,?)').run('conflict', '笔记.md', '', '', '', '', 'now');
+    await sync.clearWorkspace();
+    expect(files.clear).toHaveBeenCalledOnce();
+    expect(dbs.db.prepare('SELECT count(*) AS count FROM notes').get()).toEqual({ count: 0 });
+    expect(dbs.db.prepare('SELECT count(*) AS count FROM pending').get()).toEqual({ count: 0 });
+    expect(dbs.db.prepare('SELECT count(*) AS count FROM conflicts').get()).toEqual({ count: 0 });
+    expect(sync.status().state).toBe('unconfigured');
   });
 });

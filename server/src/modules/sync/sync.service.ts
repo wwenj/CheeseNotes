@@ -112,6 +112,25 @@ export class SyncService implements OnModuleInit {
     return this.triggerInitialize();
   }
 
+  async clearWorkspace() {
+    await this.active;
+    await this.files.clear();
+    this.database.db.transaction(() => {
+      this.database.db.prepare('DELETE FROM notes').run();
+      this.database.db.prepare('DELETE FROM pending').run();
+      this.database.db.prepare('DELETE FROM conflicts').run();
+    })();
+    this.state = 'unconfigured';
+    this.phase = 'idle';
+    this.lastError = '';
+    this.lastSuccessAt = '';
+    this.currentPath = '';
+    this.processedFiles = 0;
+    this.totalFiles = 0;
+    this.processedBytes = 0;
+    this.totalBytes = 0;
+  }
+
   async resolveConflict(id: string, dto: ResolveConflictDto) {
     const row = this.database.db.prepare('SELECT * FROM conflicts WHERE id=?').get(id) as { path: string; local_content: string | null; remote_content: string | null } | undefined;
     if (!row) return { ok: false };

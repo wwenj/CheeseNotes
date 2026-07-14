@@ -109,7 +109,7 @@ export default function App() {
 
   const content = panel === 'vault' ? vaultContent
     : panel === 'sync' ? <SyncPanel sync={workspace.sync} onSync={workspace.runSync} onRefresh={() => void workspace.reload(false)} onError={workspace.setError} />
-      : <RepositorySettings repository={workspace.repository} auth={workspace.auth} readerFontSize={workspace.clientSettings.readerFontSize} onReaderFontSizeChange={workspace.setReaderFontSize} onDisconnect={workspace.disconnect} />;
+      : <RepositorySettings repository={workspace.repository} auth={workspace.auth} readerFontSize={workspace.clientSettings.readerFontSize} onReaderFontSizeChange={workspace.setReaderFontSize} onDisconnect={workspace.disconnect} onClose={() => navigateToPanel('vault')} />;
 
   const pendingPrompt = pendingNavigation && <UnsavedChangesPrompt
     label={pendingNavigation.label}
@@ -133,6 +133,7 @@ export default function App() {
     drawerOpen={drawerOpen}
     onDrawerOpen={() => setDrawerOpen(true)}
     onDrawerClose={() => setDrawerOpen(false)}
+    showMobileMenu={panel !== 'settings'}
     feedback={feedback}
     toolbar={panel === 'vault' && workspace.note && isMarkdown(workspace.selected?.path ?? '') ? <ArticleToolbar articleMode={workspace.articleMode} onToggle={() => void workspace.changeArticleMode(workspace.articleMode === 'read' ? 'write' : 'read')} onOpenMenu={() => workspace.setSheetOpen(true)} /> : null}
   >

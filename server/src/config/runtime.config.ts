@@ -8,13 +8,19 @@ export type RuntimeConfig = {
   host: string;
   webOrigin: string;
   githubOAuthCallbackUrl: string;
+  corsOrigins: string[];
 };
 
-export const runtimeConfig = (): RuntimeConfig => ({
-  dataRoot: existsSync('/.dockerenv') ? '/var/lib/note-service' : resolve(process.cwd(), '..', '.runtime'),
-  serviceDir: 'note-service',
-  port: Number(process.env.PORT || 3000),
-  host: process.env.HOST || '0.0.0.0',
-  webOrigin: process.env.WEB_ORIGIN || 'http://localhost:5173',
-  githubOAuthCallbackUrl: process.env.GITHUB_OAUTH_CALLBACK_URL || 'http://127.0.0.1:3000/api/auth/github/callback',
-});
+export const runtimeConfig = (): RuntimeConfig => {
+  const corsOriginSetting = process.env.CORS_ORIGINS ?? 'capacitor://localhost';
+  const corsOrigins = corsOriginSetting.split(',').map((value) => value.trim()).filter(Boolean);
+  return {
+    dataRoot: existsSync('/.dockerenv') ? '/var/lib/note-service' : resolve(process.cwd(), '..', '.runtime'),
+    serviceDir: 'note-service',
+    port: Number(process.env.PORT || 3000),
+    host: process.env.HOST || '0.0.0.0',
+    webOrigin: process.env.WEB_ORIGIN || 'http://localhost:5173',
+    githubOAuthCallbackUrl: process.env.GITHUB_OAUTH_CALLBACK_URL || 'http://127.0.0.1:3000/api/auth/github/callback',
+    corsOrigins,
+  };
+};

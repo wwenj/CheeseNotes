@@ -1,0 +1,29 @@
+{
+  "name": "noteai-ios-capacitor",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@10.15.0",
+  "scripts": {
+    "ios:add": "cap add ios --packagemanager CocoaPods",
+    "ios:prepare": "node scripts/prepare-web.mjs",
+    "ios:sync": "pnpm ios:prepare && cap sync ios",
+    "ios:assets": "capacitor-assets generate --ios",
+    "ios:open": "cap open ios",
+    "ios:build:simulator": "pnpm ios:sync && xcodebuild -workspace ios/App/App.xcworkspace -scheme App -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -configuration Debug CODE_SIGNING_ALLOWED=NO build"
+  },
+  "dependencies": {
+    "@capacitor/core": "8.4.1",
+    "@capacitor/ios": "8.4.1"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "3.0.5",
+    "@capacitor/cli": "8.4.1",
+    "typescript": "5.9.2"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "sharp"
+    ]
+  }
+}
