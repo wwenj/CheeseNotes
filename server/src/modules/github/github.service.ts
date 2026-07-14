@@ -1,0 +1,149 @@
+import { BadRequestException, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import { Buffer } from 'node:buffer';
+import { getSetting, setSetting } from '../../common/database-settings.js';
+import { wait } from '../../common/time.js';
+import { DatabaseService } from '../database/database.service.js';
+import type { RepoMeta, TreeEntry } from './contracts/github.types.js';
+
+class GitHubError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+  }
+}
+
+@Injectable()
+export class GitHubService {
+  constructor(@Inject(DatabaseService) private readonly database: DatabaseService) {}
+
+  hasToken() {
+    return Boolean(getSetting(this.database.db, 'github_access_token'));
+  }
+
+  login() {
+    return getSetting(this.database.db, 'github_login');
+  }
+
+  clearToken() {
+    setSetting(this.database.db, 'github_access_token', '');
+    setSetting(this.database.db, 'github_login', '');
+  }
+
+  saveToken(token: string, login: string) {
+    setSetting(this.database.db, 'github_access_token', token);
+    setSetting(this.database.db, 'github_login', login);
+  }
+
+  async user() {
+    return this.json<{ login: string }>('/user');
+  }
+
+  async repositories(page = 1, perPage = 100) {
+    const rows = await this.json<Array<{ full_name: string; private: boolean; default_branch: string; permissions?: { push?: boolean }; updated_at: string }>>(`/user/repos?affiliation=owner,collaborator,organization_member&sort=updated&direction=desc&page=${page}&per_page=${Math.min(Math.max(perPage, 1), 100)}`);
+    return rows.filter((row) => row.permissions?.push).map((row) => ({ fullName: row.full_name, private: row.private, branch: row.default_branch, updatedAt: row.updated_at }));
+  }
+
+  async repository(fullName: string) {
+    const repo = await this.json<RepoMeta>(`/repos/${fullName}`);
+    if (!repo.permissions?.push) throw new BadRequestException('当前 GitHub 账号没有该仓库的写入权限');
+    return repo;
+  }
+
+  async tree(fullName: string, ref: string): Promise<TreeEntry[]> {
+    const recursive = await this.json<{ tree: TreeEntry[]; truncated: boolean }>(`/repos/${fullName}/git/trees/${encodeURIComponent(ref)}?recursive=1`);
+    if (!recursive.truncated) return recursive.tree;
+    const root = await this.json<{ sha: string }>(`/repos/${fullName}/git/trees/${encodeURIComponent(ref)}`);
+    const entries: TreeEntry[] = [];
+    const visit = async (sha: string, prefix = ''): Promise<void> => {
+      const result = await this.json<{ tree: TreeEntry[] }>(`/repos/${fullName}/git/trees/${sha}`);
+      for (const entry of result.tree) {
+        const path = prefix ? `${prefix}/${entry.path}` : entry.path;
+        if (entry.type === 'tree') await visit(entry.sha, path);
+        else entries.push({ ...entry, path });
+      }
+    };
+    await visit(root.sha);
+    return entries;
+  }
+
+  async raw(fullName: string, path: string, ref: string) {
+    const safePath = path.split('/').map(encodeURIComponent).join('/');
+    const response = await this.request(`/repos/${fullName}/contents/${safePath}?ref=${encodeURIComponent(ref)}`, { headers: { Accept: 'application/vnd.github.raw+json' } });
+    return Buffer.from(await response.arrayBuffer());
+  }
+
+  async put(fullName: string, branch: string, path: string, content: string, sha?: string | null) {
+    const safePath = path.split('/').map(encodeURIComponent).join('/');
+    const result = await this.json<{ content: { sha: string } }>(`/repos/${fullName}/contents/${safePath}`, {
+      method: 'PUT',
+      body: JSON.stringify({ message: `note-service: ${sha ? 'update' : 'create'} ${path}`, content: Buffer.from(content).toString('base64'), branch, ...(sha ? { sha } : {}) }),
+    });
+    return result.content.sha;
+  }
+
+  async remove(fullName: string, branch: string, path: string, sha: string) {
+    const safePath = path.split('/').map(encodeURIComponent).join('/');
+    await this.json(`/repos/${fullName}/contents/${safePath}`, { method: 'DELETE', body: JSON.stringify({ message: `note-service: delete ${path}`, branch, sha }) });
+  }
+
+  async userForToken(token: string) {
+    const response = await fetch('https://api.github.com/user', { headers: this.headers(token) });
+    const payload = await response.json().catch(() => ({})) as { login?: string; message?: string };
+    if (!response.ok || !payload.login) throw new UnauthorizedException(payload.message || 'GitHub Token 无效');
+    return payload.login;
+  }
+
+  async exchange(clientId: string, clientSecret: string, code: string, verifier: string, redirectUri: string) {
+    const response = await fetch('https://github.com/login/oauth/access_token', {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, code, code_verifier: verifier, redirect_uri: redirectUri }),
+    });
+    const payload = await response.json().catch(() => ({})) as { access_token?: string; error_description?: string; error?: string };
+    if (!response.ok || !payload.access_token) throw new BadRequestException(payload.error_description || payload.error || 'GitHub 授权失败');
+    return payload.access_token;
+  }
+
+  private token() {
+    const token = getSetting(this.database.db, 'github_access_token');
+    if (!token) throw new UnauthorizedException('请先连接 GitHub');
+    return token;
+  }
+
+  private headers(token = this.token()) {
+    return { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'note-service' };
+  }
+
+  private async request(path: string, init: RequestInit = {}) {
+    const retryable = new Set([429, 500, 502, 503, 504]);
+    let networkError: unknown;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const headers = new Headers(this.headers());
+        for (const [key, value] of new Headers(init.headers)) headers.set(key, value);
+        if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+        const response = await fetch(`https://api.github.com${path}`, { ...init, headers });
+        if (response.ok) return response;
+        if (retryable.has(response.status) && attempt < 2) {
+          const retryAfter = Number(response.headers.get('retry-after'));
+          await wait(Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter * 1000, 5_000) : 250 * 2 ** attempt);
+          continue;
+        }
+        const payload = await response.clone().json().catch(() => ({})) as { message?: string };
+        const requestId = response.headers.get('x-github-request-id');
+        throw new GitHubError(response.status, `${payload.message || `GitHub API 请求失败（${response.status}）`}${requestId ? `，请求标识：${requestId}` : ''}`);
+      } catch (error) {
+        if (error instanceof GitHubError) throw error;
+        networkError = error;
+        if (attempt < 2) {
+          await wait(250 * 2 ** attempt);
+          continue;
+        }
+      }
+    }
+    throw new GitHubError(0, `GitHub 网络请求失败：${networkError instanceof Error ? networkError.message : '未知网络错误'}`);
+  }
+
+  private async json<T = unknown>(path: string, init: RequestInit = {}) {
+    return (await this.request(path, init)).json() as Promise<T>;
+  }
+}

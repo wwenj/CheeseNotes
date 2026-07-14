@@ -1,0 +1,12 @@
+name: NoteAI
+options:
+  minimumXcodeGenVersion: 2.38.0
+  xcodeVersion: "15.4"
+  projectFormat: xcode15_3
+  deploymentTarget: { iOS: "17.0" }
+targets:
+  NoteAI:
+    type: application
+    platform: iOS
+    sources: [MyNote]
+    settings: { base: { PRODUCT_BUNDLE_IDENTIFIER: com.wwenj.mynote, SWIFT_VERSION: 5.0, INFOPLIST_FILE: MyNote/Info.plist } }
