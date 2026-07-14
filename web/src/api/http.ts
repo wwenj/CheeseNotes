@@ -2,7 +2,10 @@ export class ApiError extends Error {
   constructor(message: string, readonly status?: number) { super(message); }
 }
 
-const configuredBaseUrl = () => localStorage.getItem('note-service-url')?.replace(/\/$/, '') || '';
+declare const __NOTE_SERVICE_BASE_URL__: string;
+
+const buildTimeBaseUrl = __NOTE_SERVICE_BASE_URL__.replace(/\/$/, '');
+const configuredBaseUrl = () => localStorage.getItem('note-service-url')?.replace(/\/$/, '') || buildTimeBaseUrl;
 
 export function apiUrl(path: string) {
   return `${configuredBaseUrl()}/api/${path.replace(/^\//, '')}`;

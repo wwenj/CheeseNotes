@@ -12,6 +12,7 @@ export type RuntimeConfig = {
 };
 
 export const runtimeConfig = (): RuntimeConfig => {
+  const isProduction = process.env.NODE_ENV === 'production';
   const corsOriginSetting = process.env.CORS_ORIGINS ?? 'capacitor://localhost';
   const corsOrigins = corsOriginSetting.split(',').map((value) => value.trim()).filter(Boolean);
   return {
@@ -20,7 +21,9 @@ export const runtimeConfig = (): RuntimeConfig => {
     port: Number(process.env.PORT || 3000),
     host: process.env.HOST || '0.0.0.0',
     webOrigin: process.env.WEB_ORIGIN || 'http://localhost:5173',
-    githubOAuthCallbackUrl: process.env.GITHUB_OAUTH_CALLBACK_URL || 'http://127.0.0.1:3000/api/auth/github/callback',
+    githubOAuthCallbackUrl: isProduction
+      ? 'https://note.wwenj.com/api/auth/github/callback'
+      : 'http://127.0.0.1:3000/api/auth/github/callback',
     corsOrigins,
   };
 };

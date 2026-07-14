@@ -25,7 +25,7 @@ pnpm ios:assets
 
 ## 本地启动
 
-先启动后端。Capacitor 内置 WebView 的 `capacitor://localhost` 已是服务端默认允许的 CORS origin，GitHub callback 也已默认使用本机服务地址；只需指定 OAuth 成功后回跳 App：
+先启动后端。Capacitor 内置 WebView 的 `capacitor://localhost` 已是服务端默认允许的 CORS origin。本地 `start:dev` 固定使用 `127.0.0.1` GitHub callback，生产 `start` 固定使用 `https://note.wwenj.com` GitHub callback；只需指定 OAuth 成功后回跳 App：
 
 ```bash
 cd /Users/zu/Desktop/Code/previte/NoteAI/server
@@ -46,10 +46,24 @@ pnpm ios:open
 pnpm ios:build:simulator
 ```
 
+## 真机测试（生产 API）
+
+真机使用线上 HTTPS 服务，不使用 `127.0.0.1`。先打入生产 API 地址，再在 Xcode 连接已开启开发者模式的 iPhone，设置 Development Team，选择该设备并运行：
+
+```bash
+cd /Users/zu/Desktop/Code/previte/NoteAI/ios-capacitor
+pnpm ios:sync:production
+pnpm ios:open
+```
+
+`ios:sync:production` 会将 `https://note.wwenj.com` 写入独立打包副本。线上 API 必须允许 `capacitor://localhost` 的 CORS；当前已验证预检通过。GitHub OAuth 回跳仍取决于生产服务的 `WEB_ORIGIN=capacitor://localhost` 配置。
+
 ## 命令
 
 - `pnpm ios:prepare`：构建 Web，复制到独立 `www/`，并注入 Simulator API 地址。
+- `pnpm ios:prepare:production`：构建 Web 并注入 `https://note.wwenj.com`。
 - `pnpm ios:sync`：执行 prepare 后同步 Web 包和 iOS 原生依赖。
+- `pnpm ios:sync:production`：同步使用生产 API 的 iOS 包，供真机测试。
 - `pnpm ios:assets`：从 `assets/icon-only.png` 生成 iOS AppIcon。
 - `pnpm ios:open`：打开 `ios/App/App.xcworkspace`。
 - `pnpm ios:build:simulator`：同步后通过 `xcodebuild` 编译 Simulator 目标。

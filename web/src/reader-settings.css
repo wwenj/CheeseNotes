@@ -98,6 +98,7 @@
   .reader-document .markdown-view h1 { font-size: 1.34em; }
   .reader-document .markdown-view h2 { font-size: 1.29em; }
   .reader-document .markdown-view h3 { font-size: 1.21em; }
+  input:not([type="range"]):not([type="checkbox"]):not([type="radio"]), textarea, select { font-size: 16px; }
   .article-action-sheet { border-radius: 16px 16px 0 0; }
   .unsaved-prompt { top: auto; right: 14px; bottom: calc(14px + env(safe-area-inset-bottom)); width: calc(100vw - 28px); }
 }

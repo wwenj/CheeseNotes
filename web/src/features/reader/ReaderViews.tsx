@@ -42,7 +42,7 @@ export function ArticleEditor({ draft, readerFontSize, sourcePath, files, onChan
   };
 
   return <article className="document-view reader-document article-editor-view" style={{ '--reader-font-size': `${readerFontSize}px` } as CSSProperties}>
-    <h1 className="fallback-title article-title article-title-editor" contentEditable suppressContentEditableWarning role="textbox" aria-label="文章标题" aria-multiline="false" onInput={(event) => updateContent(event.currentTarget.textContent ?? '', article.body, true)} onKeyDown={(event) => { if (event.key === 'Enter') event.preventDefault(); }}>{article.title}</h1>
+    <h1 className="fallback-title article-title article-title-editor" contentEditable suppressContentEditableWarning role="textbox" inputMode="text" aria-label="文章标题" aria-multiline="false" onInput={(event) => updateContent(event.currentTarget.textContent ?? '', article.body, true)} onKeyDown={(event) => { if (event.key === 'Enter') event.preventDefault(); }}>{article.title}</h1>
     <MarkdownLiveEditor content={article.body} sourcePath={sourcePath} files={files} onChange={(body) => updateContent(article.title, body)} onSave={onSave} />
     <small className="article-editor-hint">点击任意段落编辑；当前行显示 Markdown 语法；⌘S 保存</small>
   </article>;

@@ -10,7 +10,14 @@ const repositoryRoot = resolve(appRoot, '..');
 const webRoot = resolve(repositoryRoot, 'web');
 const sourceDir = resolve(repositoryRoot, 'server/public');
 const outputDir = resolve(appRoot, 'www');
-const endpoint = 'http://127.0.0.1:3000';
+const defaultEndpoint = 'http://127.0.0.1:3000';
+const endpoint = normalizeEndpoint(process.env.NOTEAI_SERVICE_URL ?? defaultEndpoint);
+
+function normalizeEndpoint(value) {
+  const url = new URL(value);
+  if (!['http:', 'https:'].includes(url.protocol)) throw new Error('NOTEAI_SERVICE_URL 必须使用 http 或 https。');
+  return url.href.replace(/\/$/, '');
+}
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { cwd: appRoot, stdio: 'inherit', ...options });
@@ -26,7 +33,7 @@ async function main() {
     await cp(sourceDir, stagingDir, { recursive: true });
     const indexPath = resolve(stagingDir, 'index.html');
     const html = await readFile(indexPath, 'utf8');
-    const bootstrap = `<script data-noteai-capacitor-bootstrap>localStorage.setItem('note-service-url', '${endpoint}');</script>`;
+    const bootstrap = `<script data-noteai-capacitor-bootstrap>localStorage.setItem('note-service-url', ${JSON.stringify(endpoint)});</script>`;
     if (!/<head>/i.test(html)) throw new Error('Web build output does not contain a <head> element.');
     await writeFile(indexPath, html.replace(/<head>/i, `<head>${bootstrap}`));
 

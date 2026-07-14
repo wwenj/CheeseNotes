@@ -271,6 +271,7 @@ export default function MarkdownLiveEditor({ content, sourcePath, files, onChang
       extensions: [
         history(),
         markdown(),
+        EditorView.contentAttributes.of({ inputmode: 'text' }),
         keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab, { key: 'Mod-s', run: () => { onSaveRef.current(); return true; } }]),
         EditorView.lineWrapping,
         EditorView.updateListener.of((update) => { if (update.docChanged) onChangeRef.current(update.state.doc.toString()); }),
