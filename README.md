@@ -8,7 +8,7 @@ pnpm install
 npm run start:dev
 ```
 
-首次打开 Web 客户端时，用户手动填写自己的 GitHub OAuth App Client ID 与 Client Secret，随后通过标准 Web OAuth 完成授权。不需要配置 `.env`，也不需要启用 Device Flow。GitHub OAuth App 的 Authorization callback URL 必须填写：`http://127.0.0.1:3000/api/auth/github/callback`。
+GitHub OAuth 凭据仅保存在 `server/config/github-oauth.local.json`，该文件被 Git 忽略。首次部署时从 `server/config/github-oauth.example.json` 复制并填写本地、生产两套 OAuth App 信息；客户端只需点击连接 GitHub，不需要也不会接触 Client Secret。GitHub OAuth App 的 Authorization callback URL 分别使用配置文件中的 `authorizationCallbackUrl`。
 
 服务只读取仓库当前默认分支，不会 clone Git 历史；笔记先保存到本机，再异步调用 GitHub API 同步。本地开发数据在 `note-service/.runtime`，Docker 内固定为 `/var/lib/note-service`。授权成功后的 GitHub Access Token 仅明文保存在当前服务本机的 SQLite 中，不会返回或存入 Web 页面。
 

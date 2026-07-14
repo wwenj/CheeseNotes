@@ -2,6 +2,14 @@ import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GitHubService, OAuthService, PathPolicy, RepositoryService, SyncService, type DatabaseService, type FileStoreService } from '../src/services.js';
 
+vi.mock('../src/config/runtime.config.js', () => ({
+  runtimeConfig: () => ({
+    githubOAuthClientId: 'client-id',
+    githubOAuthClientSecret: 'client-secret',
+    githubOAuthCallbackUrl: 'http://127.0.0.1:3000/api/auth/github/callback',
+  }),
+}));
+
 const makeDatabaseService = () => {
   const db = new Database(':memory:');
   db.exec('CREATE TABLE settings(key TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE oauth_web_states(state TEXT PRIMARY KEY, client_id TEXT NOT NULL, client_secret TEXT NOT NULL, verifier TEXT NOT NULL, created_at TEXT NOT NULL); CREATE TABLE notes(path TEXT PRIMARY KEY, revision TEXT, updated_at TEXT, remote_sha TEXT); CREATE TABLE pending(path TEXT PRIMARY KEY, op TEXT, base_commit TEXT, base_blob TEXT, base_content TEXT, local_content TEXT, updated_at TEXT); CREATE TABLE conflicts(id TEXT PRIMARY KEY, path TEXT, base_content TEXT, local_content TEXT, remote_content TEXT, remote_commit TEXT, created_at TEXT); CREATE TABLE sync_runs(id INTEGER PRIMARY KEY AUTOINCREMENT, state TEXT, error TEXT, created_at TEXT); CREATE TABLE sync_jobs(id INTEGER PRIMARY KEY AUTOINCREMENT, state TEXT, phase TEXT, error TEXT, created_at TEXT, updated_at TEXT);');
@@ -36,7 +44,7 @@ describe('RepositoryService', () => {
 });
 
 describe('OAuthService', () => {
-  it('使用前端提供的 OAuth App 信息创建 PKCE 授权，并且只把 Token 存入本地 settings', async () => {
+  it('使用服务端 OAuth 配置创建 PKCE 授权，并且只把 Token 存入本地 settings', async () => {
     const dbs = makeDatabaseService();
     const github = new GitHubService(dbs);
     const oauth = new OAuthService(dbs, github);
@@ -45,7 +53,7 @@ describe('OAuthService', () => {
       return new Response(JSON.stringify({ login: 'wwenj' }), { status: 200, headers: { 'content-type': 'application/json' } });
     });
     vi.stubGlobal('fetch', fetch);
-    const authorization = oauth.beginWeb('client-id', 'client-secret');
+    const authorization = oauth.beginWeb();
     const url = new URL(authorization.url);
     expect(url.searchParams.get('scope')).toBe('repo');
     expect(url.searchParams.get('code_challenge_method')).toBe('S256');

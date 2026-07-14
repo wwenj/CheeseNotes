@@ -1,18 +1,9 @@
-import { Body, Controller, Delete, Get, Inject, Post, Query, Res } from '@nestjs/common';
-import { IsString } from 'class-validator';
+import { Controller, Delete, Get, Inject, Post, Query, Res } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 import { runtimeConfig } from '../../config/runtime.config.js';
 import { RepositoryService } from '../settings/repository.service.js';
 import { SyncService } from '../sync/sync.service.js';
 import { OAuthService } from './oauth.service.js';
-
-class WebAuthorizationDto {
-  @IsString()
-  clientId!: string;
-
-  @IsString()
-  clientSecret!: string;
-}
 
 @Controller('auth/github')
 export class AuthController {
@@ -23,8 +14,8 @@ export class AuthController {
   ) {}
 
   @Post('login')
-  startWeb(@Body() dto: WebAuthorizationDto) {
-    return this.oauth.beginWeb(dto.clientId, dto.clientSecret);
+  startWeb() {
+    return this.oauth.beginWeb();
   }
 
   @Get('callback')

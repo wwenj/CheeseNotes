@@ -25,11 +25,11 @@ pnpm ios:assets
 
 ## 本地启动
 
-先启动后端。Capacitor 内置 WebView 的 `capacitor://localhost` 已是服务端默认允许的 CORS origin。本地 `start:dev` 固定使用 `127.0.0.1` GitHub callback，生产 `start` 固定使用 `https://note.wwenj.com` GitHub callback；只需指定 OAuth 成功后回跳 App：
+先启动后端。Capacitor 内置 WebView 的 `capacitor://localhost` 已是服务端默认允许的 CORS origin。GitHub OAuth 的本地与生产 callback、homepage 均从 `server/config/github-oauth.local.json` 读取：
 
 ```bash
 cd /Users/zu/Desktop/Code/previte/NoteAI/server
-WEB_ORIGIN=capacitor://localhost pnpm start:dev
+pnpm start:dev
 ```
 
 另开终端构建并启动 Simulator：
@@ -56,7 +56,7 @@ pnpm ios:sync:production
 pnpm ios:open
 ```
 
-`ios:sync:production` 会将 `https://note.wwenj.com` 写入独立打包副本。线上 API 必须允许 `capacitor://localhost` 的 CORS；当前已验证预检通过。GitHub OAuth 回跳仍取决于生产服务的 `WEB_ORIGIN=capacitor://localhost` 配置。
+`ios:sync:production` 会将 `https://note.wwenj.com` 写入独立打包副本。线上 API 必须允许 `capacitor://localhost` 的 CORS；当前已验证预检通过。GitHub OAuth 的服务器回跳地址从本地配置文件读取；自动回到 iOS App 仍需要后续 Deep Link 支持。
 
 ## 命令
 

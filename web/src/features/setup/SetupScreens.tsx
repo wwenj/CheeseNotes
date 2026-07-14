@@ -8,21 +8,14 @@ export function SetupScreen({ feedback, children }: { feedback?: ReactNode; chil
 }
 
 export function ConnectGitHub({ error }: { error: string | null }) {
-  const [clientId, setClientId] = useState(() => localStorage.getItem('github-oauth-client-id') || '');
-  const [clientSecret, setClientSecret] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const begin = async () => {
-    if (!clientId.trim() || !clientSecret.trim()) {
-      setLocalError('请填写 GitHub OAuth App Client ID 与 Client Secret。');
-      return;
-    }
     setSubmitting(true);
     setLocalError(null);
     try {
-      const authorization = await githubApi.startWebAuthorization(clientId.trim(), clientSecret.trim());
-      localStorage.setItem('github-oauth-client-id', clientId.trim());
+      const authorization = await githubApi.startWebAuthorization();
       window.location.href = authorization.url;
     } catch (reason) {
       setLocalError(messageOf(reason));
@@ -34,16 +27,14 @@ export function ConnectGitHub({ error }: { error: string | null }) {
   return <section className="setup-card setup-connect-card">
     <div className="setup-brand-mark"><span className="setup-icon"><Github size={25} /></span><span>GitHub</span></div>
     <h1>连接你的笔记库</h1>
-    <p>填写你的 GitHub OAuth App 信息，授权后选择一个可写仓库作为笔记库。</p>
+    <p>授权 GitHub 后选择一个可写仓库作为笔记库。</p>
     <form className="setup-form" onSubmit={(event) => { event.preventDefault(); void begin(); }}>
-      <label htmlFor="github-client-id">GitHub OAuth App Client ID<input id="github-client-id" value={clientId} onChange={(event) => setClientId(event.target.value)} placeholder="Ov23li..." autoCapitalize="none" autoCorrect="off" /></label>
-      <label htmlFor="github-client-secret">GitHub OAuth App Client Secret<input id="github-client-secret" type="password" value={clientSecret} onChange={(event) => setClientSecret(event.target.value)} autoComplete="off" /></label>
       <button type="submit" className="accent-button setup-action" disabled={submitting}>
         {submitting ? <LoaderCircle className="spin" size={16} /> : <Github size={16} />}连接 GitHub
       </button>
     </form>
     {(localError || error) && <span className="setup-error">{localError || error}</span>}
-    <div className="setup-note"><ShieldCheck size={15} /><span>回调地址必须是 <code>http://127.0.0.1:3000/api/auth/github/callback</code>。不需要启用设备流。</span></div>
+    <div className="setup-note"><ShieldCheck size={15} /><span>将跳转至 GitHub 完成授权，不需要启用设备流。</span></div>
   </section>;
 }
 
