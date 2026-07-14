@@ -3,6 +3,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import fastifyStatic from '@fastify/static';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { AppModule } from './app.module.js';
@@ -16,7 +17,18 @@ async function bootstrap() {
   if (config.corsOrigins.length) app.enableCors({ origin: config.corsOrigins, credentials: false });
   const publicDir = resolve(process.cwd(), 'public');
   if (existsSync(publicDir)) {
-    await app.getHttpAdapter().getInstance().register(fastifyStatic, { root: publicDir, prefix: '/' });
+    const fastify = app.getHttpAdapter().getInstance();
+    await fastify.register(fastifyStatic, { root: publicDir, prefix: '/', wildcard: false });
+    fastify.get('/*', (request: FastifyRequest, reply: FastifyReply) => {
+      if (request.url === '/api' || request.url.startsWith('/api/')) {
+        return reply.code(404).send({
+          statusCode: 404,
+          error: 'Not Found',
+          message: `Cannot ${request.method} ${request.url}`,
+        });
+      }
+      return reply.type('text/html').sendFile('index.html', { maxAge: 0, immutable: false });
+    });
   }
   await app.listen(config.port, config.host);
 }
