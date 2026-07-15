@@ -24,6 +24,8 @@
 .setup-form input:focus { border-color: #9ba8b6; background: #fff; box-shadow: 0 0 0 4px rgb(61 85 111 / .09); }
 .setup-connect-card .setup-action { min-height: 46px; margin: 6px 0 0; border-color: #252c35; border-radius: 9px; color: #fff; background: #252c35; font-size: 13px; }
 .setup-connect-card .setup-action:hover { background: #141a20; }
+.setup-connect-card .setup-refresh-action { min-height: 42px; border-color: #dfe3e8; border-radius: 9px; color: #4e5a66; }
+.setup-connect-card .setup-refresh-action:hover { border-color: #c7ced6; background: #f7f9fb; }
 .setup-connect-card .setup-error { margin: 16px 0 0; padding: 10px 12px; border: 1px solid #f0d8d4; border-radius: 8px; color: #a34f47; background: #fff5f3; line-height: 1.55; }
 .setup-note { display: flex; align-items: flex-start; gap: 9px; margin-top: 24px; padding-top: 18px; border-top: 1px solid #edf0f2; color: #7c8792; font-size: 11px; line-height: 1.65; }
 .setup-note svg { flex: 0 0 auto; margin-top: 2px; color: #8996a3; }

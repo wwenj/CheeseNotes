@@ -32,6 +32,7 @@ export function ConnectGitHub({ error }: { error: string | null }) {
       <button type="submit" className="accent-button setup-action" disabled={submitting}>
         {submitting ? <LoaderCircle className="spin" size={16} /> : <Github size={16} />}连接 GitHub
       </button>
+      <button type="button" className="quiet-action setup-refresh-action" onClick={() => window.location.reload()}>已成功连接</button>
     </form>
     {(localError || error) && <span className="setup-error">{localError || error}</span>}
     <div className="setup-note"><ShieldCheck size={15} /><span>将跳转至 GitHub 完成授权，不需要启用设备流。</span></div>
@@ -62,7 +63,6 @@ export function RepositoryPicker({ login, onSelect, compact = false }: { login: 
 
   return <section className={compact ? 'repository-picker compact-picker' : 'setup-card repository-picker'}>
     {!compact && <><span className="setup-icon"><ShieldCheck size={24} /></span><h1>选择笔记库</h1><p>已连接 <strong>{login}</strong>。只会下载仓库当前分支，不会克隆 Git 历史。</p></>}
-    {!compact && <button type="button" className="quiet-action" onClick={() => window.location.reload()}>已成功连接</button>}
     <label>搜索可写仓库<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="owner/repository" /></label>
     {loading ? <span className="inline-loading"><LoaderCircle className="spin" size={15} />读取仓库列表</span> : <div className="repository-list">
       {visible.map((item) => <button type="button" key={item.fullName} className="repository-item" onClick={() => void select(item.fullName)}><span>{item.fullName}</span><small>{item.private ? '私有' : '公开'} · {item.branch}</small></button>)}
