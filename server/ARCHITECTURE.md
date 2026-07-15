@@ -1,6 +1,6 @@
 # Server architecture
 
-当前服务采用“模块化单体 + Controller / Service / Store / Contract”结构。接口路径和成功响应保持现有 Web、iOS 客户端兼容，内部实现按领域重新组装。
+当前服务采用“模块化单体 + Controller / Service / Store / Contract”结构。基础接口路径和成功响应保持现有 Web、iOS 客户端兼容，内部实现按领域重新组装。
 
 ## 目录分层
 
@@ -44,25 +44,27 @@ SettingsApi ────────────────> Sync
 Notes ───────────────────────> Storage / Database
 ```
 
-同步模块不再依赖 `NoteService`，而是直接通过 `FileStoreService` 处理远端激活和冲突文件。这样避免“笔记保存依赖同步、同步又依赖笔记服务”的业务循环；笔记服务只通过 `SyncService.record()` 记录待同步变更。
+同步模块不依赖 `NoteService`，直接读取 SQLite 的 `notes.dirty/deleted` 作为唯一持久任务，并通过 GitHub Git Data API 创建原子 commit、回读 tree 与内容验证。`FileStoreService` 只用于媒体资源缓存和旧数据迁移，不能决定同步状态；笔记服务在同一 SQLite 事务内保存内容、revision 与 generation，再触发 `SyncService.schedule()`。
 
 ## 接口契约
 
-全局前缀仍为 `/api`，成功响应仍为原始 JSON，不新增响应 envelope，以兼容现有客户端。
+全局前缀仍为 `/api`，基础接口成功响应仍为原始 JSON，不新增响应 envelope，以兼容现有客户端；`GET /api/tree?includeFolders=1` 是仅供 Web 使用的扩展树响应。
 
 | 模块 | 接口 |
 | --- | --- |
 | Health | `GET /api/health` |
-| Notes | `GET /api/tree`、`GET /api/notes/content`、`GET /api/notes/render`、`GET /api/files`、`GET /api/search` |
-| Notes | `POST /api/notes`、`PUT /api/notes`、`DELETE /api/notes` |
+| Notes | `GET /api/tree`、`GET /api/tree?includeFolders=1`、`GET /api/notes/content`、`GET /api/notes/render`、`GET /api/files`、`GET /api/search` |
+| Notes | `POST /api/notes`、`PUT /api/notes`、`DELETE /api/notes`、`POST /api/folders` |
 | Sync | `GET /api/sync/status`、`POST /api/sync` |
-| Sync | `GET /api/sync/conflicts`、`GET /api/sync/conflicts/:id`、`POST /api/sync/conflicts/:id/resolve` |
+| Sync | `GET /api/sync/conflicts`、`GET /api/sync/conflicts/:id`、`PUT /api/sync/conflicts/decisions`、`PUT /api/sync/conflicts/:id/decision`、`POST /api/sync/conflicts/apply-decisions` |
 | Settings | `GET /api/settings/repository`、`PUT /api/settings/repository` |
 | GitHub OAuth | `POST /api/auth/github/login`、`GET /api/auth/github/callback`、`GET /api/auth/github/status`、`DELETE /api/auth/github` |
 | GitHub | `GET /api/github/repositories` |
 | Maintenance | `POST /api/maintenance/reset/prepare`、`POST /api/maintenance/reset/execute` |
 
 写入类 DTO 使用全局 `ValidationPipe` 的 `transform + whitelist + forbidNonWhitelisted` 校验；笔记写入仍只允许 Markdown，路径安全规则统一由 `PathPolicy` 执行。
+
+`GET /api/tree` 保持文件数组响应，供既有 iOS 客户端使用；Web 使用 `includeFolders=1` 获取 `{ files, folders }`。空文件夹只保留在本机存储，不会上传 GitHub；向其中写入文件后，文件会按既有同步流程上传。
 
 ## 运行时配置
 

@@ -7,7 +7,7 @@ import { displayName, isMarkdown, isText } from '../../lib/files';
 import { splitArticle } from '../../lib/article';
 import AssetViewer from '../../components/AssetViewer';
 import MarkdownRenderer from '../../components/MarkdownRenderer';
-import type { ArticleMode, Draft } from '../../app/types';
+import type { ArticleMode } from '../../app/types';
 
 type DocumentViewProps = {
   selected: NoteSummary | null;
@@ -81,12 +81,4 @@ export function ArticleActionSheet({ mode, onClose, onModeChange, onCopy, onFavo
     <div className="sheet-group"><button type="button" className="sheet-row" onClick={() => requestClose(onCopy)}><Copy size={18} /><span>复制文章</span></button><button type="button" className="sheet-row" onClick={() => requestClose(onFavorite)}><Heart size={18} /><span>收藏</span><small>即将支持</small></button></div>
     <div className="sheet-group"><button type="button" className="sheet-row sheet-danger" onClick={() => requestClose(onDelete)}><Trash2 size={18} /><span>删除文章</span></button></div>
   </section></>;
-}
-
-export function UnsavedChangesPrompt({ label, onCancel, onDiscard, onSave }: { label: string; onCancel: () => void; onDiscard: () => void; onSave: () => void }) {
-  return <div className="unsaved-prompt" role="alertdialog" aria-modal="true" aria-label="未保存修改"><strong>有未保存的修改</strong><span>继续{label}前，请先处理当前文章。</span><div><button type="button" className="quiet-action" onClick={onCancel}>继续编辑</button><button type="button" className="quiet-action" onClick={onDiscard}>放弃</button><button type="button" className="accent-button" onClick={onSave}>保存并继续</button></div></div>;
-}
-
-export function Editor({ draft, onChange, onSave, onDelete, onCancel }: { draft: Draft; onChange: (draft: Draft) => void; onSave: () => void; onDelete: () => void; onCancel: () => void }) {
-  return <section className="editor-view"><header className="editor-header"><span>{draft.revision ? '编辑笔记' : '新建笔记'}</span><div>{draft.revision && <button type="button" className="delete-action" onClick={onDelete}><Trash2 size={15} />删除</button>}<button type="button" className="quiet-action" onClick={onCancel}>取消</button><button type="button" className="accent-button" onClick={onSave}><Check size={16} />保存</button></div></header><label className="path-field">路径<input value={draft.path} onChange={(event) => onChange({ ...draft, path: event.target.value })} autoFocus /></label><textarea className="source-editor" value={draft.content} onChange={(event) => onChange({ ...draft, content: event.target.value })} spellCheck="false" /></section>;
 }

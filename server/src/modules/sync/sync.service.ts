@@ -1,115 +1,86 @@
-import { BadRequestException, Inject, Injectable, OnModuleInit, Optional, UnauthorizedException } from '@nestjs/common';
-import { randomBytes } from 'node:crypto';
-import { existsSync, promises as fs } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { BadRequestException, Inject, Injectable, OnModuleInit, UnauthorizedException } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
+import { dirname, extname, join } from 'node:path';
 import { hash } from '../../common/crypto.js';
 import { isText } from '../../common/file-types.js';
-import { now, nowForPath } from '../../common/time.js';
+import { noteTitle } from '../../common/note-title.js';
+import { now } from '../../common/time.js';
 import { DatabaseService } from '../database/database.service.js';
 import { GitHubService } from '../github/github.service.js';
+import type { TreeEntry } from '../github/contracts/github.types.js';
 import { RepositoryService } from '../settings/repository.service.js';
 import { FileStoreService } from '../storage/file-store.service.js';
 import { PathPolicy } from '../storage/path-policy.service.js';
-import type { ConflictAction, ResolveConflictDto } from './contracts/sync.dto.js';
-import type { NoteRow, PendingOperation, PendingRow, SyncPhase, SyncState } from './contracts/sync.types.js';
+import type { ConflictAction, SaveConflictDecisionDto } from './contracts/sync.dto.js';
+import type { NoteRow, SyncPhase, SyncState, WorkspaceRow } from './contracts/sync.types.js';
+
+type RemoteSnapshot = { head: string; treeSha: string; entries: Map<string, TreeEntry> };
+type Claim = Pick<NoteRow, 'id' | 'path' | 'remote_path' | 'content' | 'revision' | 'deleted'>;
+const retryDelays = [5_000, 15_000, 30_000, 60_000, 300_000];
 
 @Injectable()
 export class SyncService implements OnModuleInit {
   private active: Promise<void> | null = null;
-  private jobId: number | null = null;
-  private state: SyncState = 'unconfigured';
-  private phase: SyncPhase = 'idle';
-  private lastError = '';
-  private lastSuccessAt = '';
-  private currentPath = '';
-  private processedFiles = 0;
-  private totalFiles = 0;
-  private processedBytes = 0;
-  private totalBytes = 0;
-  private readonly files: FileStoreService;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     @Inject(DatabaseService) private readonly database: DatabaseService,
     @Inject(PathPolicy) private readonly paths: PathPolicy,
     @Inject(RepositoryService) private readonly repository: RepositoryService,
     @Inject(GitHubService) private readonly github: GitHubService,
-    @Optional() @Inject(FileStoreService) files?: FileStoreService,
-  ) {
-    this.files = files ?? new FileStoreService(paths);
-  }
+    @Inject(FileStoreService) files?: FileStoreService,
+  ) { this.files = files ?? new FileStoreService(paths); }
+
+  private readonly files: FileStoreService;
 
   onModuleInit() {
-    if (!this.repository.get()) this.state = 'unconfigured';
-    else if (!this.github.hasToken()) this.state = 'unauthorized';
-    else if (this.repository.initialized()) this.triggerSync();
-    else this.triggerInitialize();
-    setInterval(() => this.triggerSync(), 300_000);
+    void this.bootstrap();
+    setInterval(() => this.triggerSync(), 60_000);
   }
 
   status() {
+    const workspace = this.workspace();
+    const dirtyCount = this.countDirty();
+    const conflictCount = this.countConflicts();
+    const state = this.derivedState(workspace, dirtyCount, conflictCount);
     return {
-      state: this.state,
-      phase: this.phase,
-      currentPath: this.currentPath,
-      processedFiles: this.processedFiles,
-      totalFiles: this.totalFiles,
-      processedBytes: this.processedBytes,
-      totalBytes: this.totalBytes,
-      pendingCount: this.count('pending'),
-      conflictCount: this.count('conflicts'),
-      lastSuccessAt: this.lastSuccessAt,
-      lastError: this.lastError,
+      state,
+      phase: workspace.phase,
+      dirtyCount,
+      pendingCount: dirtyCount,
+      conflictCount,
+      currentPath: '', processedFiles: 0, totalFiles: 0, processedBytes: 0, totalBytes: 0,
+      resolutionDraftCount: this.countDecisions(), syncBlockedByConflicts: false,
+      lastSuccessAt: workspace.verified_at, lastError: workspace.last_error,
+      lastRemoteHead: workspace.last_remote_head, verifiedRemoteHead: workspace.verified_remote_head,
+      localGeneration: workspace.generation, verifiedGeneration: workspace.verified_generation,
+      nextRetryAt: workspace.next_retry_at,
       manualSyncAvailable: !this.active && Boolean(this.repository.get()) && this.github.hasToken(),
     };
   }
 
-  triggerInitialize() {
-    if (!this.repository.get()) {
-      this.state = 'unconfigured';
-      return this.status();
-    }
-    if (!this.github.hasToken()) {
-      this.state = 'unauthorized';
-      return this.status();
-    }
-    this.launch('initializing', 'validating-auth', () => this.initialize());
-    return this.status();
+  schedule() {
+    this.setWorkspace({ state: 'pending', phase: 'idle', last_error: '', next_retry_at: '' });
+    void this.triggerSync();
   }
+
+  // 兼容旧调用方；写入已由 NoteService 的 SQLite 事务完成。
+  record() { this.schedule(); }
+
+  triggerInitialize() { return this.triggerSync(); }
+  reset() { return this.triggerSync(); }
 
   triggerSync() {
     if (!this.repository.get()) {
-      this.state = 'unconfigured';
+      this.setWorkspace({ state: 'unconfigured', phase: 'idle' });
       return this.status();
     }
     if (!this.github.hasToken()) {
-      this.state = 'unauthorized';
+      this.setWorkspace({ state: 'unauthorized', phase: 'idle' });
       return this.status();
     }
-    if (!this.repository.initialized()) return this.triggerInitialize();
-    this.launch('syncing', 'validating-repository', () => this.sync());
+    if (!this.active) this.active = this.run().finally(() => { this.active = null; });
     return this.status();
-  }
-
-  record(path: string, op: PendingOperation, local: string | null, baseContent: string | null) {
-    const existing = this.database.db.prepare('SELECT * FROM pending WHERE path=?').get(path) as PendingRow | undefined;
-    if (existing?.op === 'create' && op === 'delete') {
-      this.database.db.prepare('DELETE FROM pending WHERE path=?').run(path);
-      this.state = this.count('pending') ? 'pending' : 'synced';
-      return;
-    }
-    if (existing) {
-      const nextOp = existing.op === 'create' && op === 'update' ? 'create' : op;
-      this.database.db.prepare('UPDATE pending SET op=?,local_content=?,updated_at=? WHERE path=?').run(nextOp, local, now(), path);
-    } else {
-      const note = this.database.db.prepare('SELECT remote_sha FROM notes WHERE path=?').get(path) as { remote_sha?: string } | undefined;
-      this.database.db.prepare('INSERT INTO pending(path,op,base_commit,base_blob,base_content,local_content,updated_at) VALUES(?,?,?,?,?,?,?)').run(path, op, '', note?.remote_sha ?? null, baseContent, local, now());
-    }
-    this.state = 'pending';
-    this.triggerSync();
-  }
-
-  reset() {
-    return this.triggerInitialize();
   }
 
   async clearWorkspace() {
@@ -119,227 +90,46 @@ export class SyncService implements OnModuleInit {
       this.database.db.prepare('DELETE FROM notes').run();
       this.database.db.prepare('DELETE FROM pending').run();
       this.database.db.prepare('DELETE FROM conflicts').run();
+      this.database.db.prepare('DELETE FROM local_folders').run();
+      this.database.db.prepare("UPDATE sync_workspace SET generation=0,verified_generation=-1,last_remote_head='',verified_remote_head='',verified_at='',state='unconfigured',phase='idle',last_error='',next_retry_at='',lock_token='',lock_until='',updated_at='' WHERE id=1").run();
     })();
-    this.state = 'unconfigured';
-    this.phase = 'idle';
-    this.lastError = '';
-    this.lastSuccessAt = '';
-    this.currentPath = '';
-    this.processedFiles = 0;
-    this.totalFiles = 0;
-    this.processedBytes = 0;
-    this.totalBytes = 0;
   }
 
-  async resolveConflict(id: string, dto: ResolveConflictDto) {
-    const row = this.database.db.prepare('SELECT * FROM conflicts WHERE id=?').get(id) as { path: string; local_content: string | null; remote_content: string | null } | undefined;
-    if (!row) return { ok: false };
-    const backup = `冲突备份/${nowForPath()}/${row.path}`;
-    const local = this.resolveContent(dto.action, dto.content, row.local_content, row.remote_content);
-    const preserved = dto.action === 'keep-local' ? row.remote_content : row.local_content;
-    await this.files.write(backup, preserved ?? '');
-    const current = await this.files.readText(row.path).catch(() => null);
-    await this.files.write(row.path, local ?? '');
-    const remoteSha = (this.database.db.prepare('SELECT remote_sha FROM notes WHERE path=?').get(row.path) as { remote_sha?: string } | undefined)?.remote_sha ?? null;
-    this.database.db.prepare('INSERT OR REPLACE INTO notes(path,revision,updated_at,remote_sha) VALUES(?,?,?,?)').run(row.path, hash(local ?? ''), now(), remoteSha);
-    this.database.db.prepare('DELETE FROM conflicts WHERE id=?').run(id);
-    this.record(row.path, current === null ? 'create' : 'update', local ?? '', current);
+  conflicts({ cursor, limit, query, review }: { cursor?: string; limit?: string; query?: string; review?: string }) {
+    const offset = Math.max(0, Number.parseInt(cursor ?? '0', 10) || 0);
+    const pageSize = Math.min(50, Math.max(1, Number.parseInt(limit ?? '50', 10) || 50));
+    const where = [query?.trim() ? 'path LIKE ?' : '', review === 'decided' ? 'resolution_action IS NOT NULL' : '', review === 'undecided' ? 'resolution_action IS NULL' : ''].filter(Boolean);
+    const values: Array<string | number> = query?.trim() ? [`%${query.trim()}%`] : [];
+    const filter = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const total = (this.database.db.prepare(`SELECT count(*) count FROM conflicts ${filter}`).get(...values) as { count: number }).count;
+    const items = this.database.db.prepare(`SELECT id,path,remote_commit,created_at,COALESCE(operation,'update') operation,resolution_action,resolution_copy_path,length(COALESCE(local_content,'')) local_bytes,length(COALESCE(remote_content,'')) remote_bytes FROM conflicts ${filter} ORDER BY created_at,id LIMIT ? OFFSET ?`).all(...values, pageSize, offset);
+    return { items, nextCursor: offset + items.length < total ? String(offset + items.length) : null, total, resolutionDraftCount: this.countDecisions() };
+  }
+
+  conflictDetail(id: string): any {
+    const row = this.database.db.prepare('SELECT * FROM conflicts WHERE id=?').get(id) as Record<string, unknown> | undefined;
+    return row ? { ...row, operation: row.operation ?? 'update' } : null;
+  }
+
+  saveConflictDecision(id: string, dto: SaveConflictDecisionDto) {
+    if (dto.clear) this.database.db.prepare('UPDATE conflicts SET resolution_action=NULL,resolution_content=NULL WHERE id=?').run(id);
+    else if (dto.action) this.database.db.prepare('UPDATE conflicts SET resolution_action=?,resolution_content=?,resolution_updated_at=? WHERE id=?').run(dto.action, dto.action === 'manual' ? dto.content ?? '' : null, now(), id);
+    else throw new BadRequestException('请选择冲突处理方式');
+    return { ok: true, conflict: this.conflictDetail(id), sync: this.status() };
+  }
+
+  saveAllConflictDecisions(dto: SaveConflictDecisionDto) {
+    if (dto.clear) this.database.db.prepare('UPDATE conflicts SET resolution_action=NULL,resolution_content=NULL').run();
+    else if (dto.action && dto.action !== 'manual') this.database.db.prepare('UPDATE conflicts SET resolution_action=?,resolution_content=NULL,resolution_updated_at=?').run(dto.action, now());
+    else throw new BadRequestException('请选择自动处理方式');
     return { ok: true, sync: this.status() };
   }
 
-  private resolveContent(action: ConflictAction, content: string | undefined, local: string | null, remote: string | null) {
-    if (action === 'use-remote') return remote;
-    if (action === 'manual') return content;
-    return local;
-  }
-
-  private launch(state: SyncState, phase: SyncPhase, task: () => Promise<void>) {
-    if (this.active) return;
-    this.state = state;
-    this.phase = phase;
-    this.lastError = '';
-    this.currentPath = '';
-    this.processedFiles = 0;
-    this.totalFiles = 0;
-    this.processedBytes = 0;
-    this.totalBytes = 0;
-    const stamp = now();
-    this.jobId = Number(this.database.db.prepare('INSERT INTO sync_jobs(state,phase,error,created_at,updated_at) VALUES(?,?,?,?,?)').run(state, phase, null, stamp, stamp).lastInsertRowid);
-    this.active = (async () => {
-      try {
-        await task();
-        this.phase = 'completed';
-        this.lastSuccessAt = now();
-        this.state = this.count('conflicts') ? 'conflict' : (this.count('pending') ? 'pending' : 'synced');
-        this.finishJob(null);
-      } catch (error) {
-        this.phase = 'failed';
-        this.state = 'failed';
-        this.lastError = this.errorMessage(error);
-        this.database.db.prepare('INSERT INTO sync_runs(state,error,created_at) VALUES(?,?,?)').run(this.state, this.lastError, now());
-        this.finishJob(this.lastError);
-      } finally {
-        this.active = null;
-        this.jobId = null;
-      }
-    })();
-  }
-
-  private async initialize() {
-    const { fullName, branch } = await this.remote();
-    this.phase = 'loading-tree';
-    const entries = (await this.github.tree(fullName, branch)).filter((entry) => entry.type === 'blob' && this.paths.allowed(entry.path));
-    const tooLarge = entries.find((entry) => (entry.size ?? 0) > 100 * 1024 * 1024);
-    if (tooLarge) throw new BadRequestException(`文件超过 GitHub Contents API 的 100MB 限制：${tooLarge.path}`);
-    const textEntries = entries.filter((entry) => isText(entry.path));
-    this.totalFiles = textEntries.length;
-    this.totalBytes = textEntries.reduce((sum, entry) => sum + (entry.size ?? 0), 0);
-    this.phase = 'downloading';
-    const job = randomBytes(8).toString('hex');
-    const staging = join(this.files.dataRoot(), 'staging', job, 'store');
-    await fs.rm(staging, { recursive: true, force: true });
-    await fs.mkdir(staging, { recursive: true });
-    const notes = entries.map((entry) => ({ path: entry.path, revision: hash(entry.path), remote_sha: entry.sha, updated_at: now() }));
-    let cursor = 0;
-    const download = async () => {
-      while (true) {
-        const index = cursor++;
-        if (index >= textEntries.length) return;
-        const entry = textEntries[index];
-        this.currentPath = entry.path;
-        const data = await this.github.raw(fullName, entry.path, branch);
-        await this.files.writeIn(staging, entry.path, data);
-        notes[entries.indexOf(entry)].revision = hash(data);
-        this.processedFiles += 1;
-        this.processedBytes += data.byteLength;
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(5, Math.max(textEntries.length, 1)) }, () => download()));
-    this.phase = 'activating';
-    try {
-      await this.activate(staging, notes);
-    } catch (error) {
-      await fs.rm(join(this.files.dataRoot(), 'staging', job), { recursive: true, force: true });
-      throw error;
-    }
-    if (this.count('pending')) await this.sync();
-  }
-
-  private async sync() {
-    const { fullName, branch } = await this.remote();
-    this.phase = 'loading-tree';
-    const entries = (await this.github.tree(fullName, branch)).filter((entry) => entry.type === 'blob' && this.paths.allowed(entry.path));
-    const remote = new Map(entries.map((entry) => [entry.path, entry]));
-    const pending = this.database.db.prepare('SELECT path,op,base_blob,base_content,local_content FROM pending ORDER BY updated_at').all() as PendingRow[];
-    this.phase = 'uploading';
-    this.totalFiles = pending.length;
-    for (const row of pending) {
-      this.currentPath = row.path;
-      await this.pushPending(fullName, branch, remote, row);
-      this.processedFiles += 1;
-    }
-    this.phase = 'refreshing';
-    await this.applyRemote(fullName, branch, remote);
-  }
-
-  private async remote() {
-    this.phase = 'validating-auth';
-    await this.github.user();
-    this.phase = 'validating-repository';
-    const fullName = this.repository.get();
-    const meta = await this.github.repository(fullName);
-    const branch = meta.default_branch;
-    this.repository.setBranch(branch);
-    return { fullName, branch };
-  }
-
-  private async pushPending(fullName: string, branch: string, remote: Map<string, { path: string; type: 'blob' | 'tree' | 'commit'; sha: string; size?: number }>, row: PendingRow) {
-    const entry = remote.get(row.path);
-    if (row.op === 'create') {
-      if (entry) return this.conflict(fullName, branch, row, entry);
-      const sha = await this.github.put(fullName, branch, row.path, row.local_content ?? '');
-      remote.set(row.path, { path: row.path, type: 'blob', sha, size: Buffer.byteLength(row.local_content ?? '') });
-      this.updateRemoteSha(row.path, sha, row.local_content ?? '');
-      this.database.db.prepare('DELETE FROM pending WHERE path=?').run(row.path);
-      return;
-    }
-    if (!entry || entry.sha !== row.base_blob) return this.conflict(fullName, branch, row, entry);
-    if (row.op === 'update') {
-      const sha = await this.github.put(fullName, branch, row.path, row.local_content ?? '', entry.sha);
-      remote.set(row.path, { ...entry, sha, size: Buffer.byteLength(row.local_content ?? '') });
-      this.updateRemoteSha(row.path, sha, row.local_content ?? '');
-    } else {
-      await this.github.remove(fullName, branch, row.path, entry.sha);
-      remote.delete(row.path);
-    }
-    this.database.db.prepare('DELETE FROM pending WHERE path=?').run(row.path);
-  }
-
-  private async conflict(fullName: string, branch: string, row: PendingRow, entry?: { sha: string }) {
-    const remoteContent = entry ? (await this.github.raw(fullName, row.path, branch)).toString('utf8') : null;
-    this.database.db.prepare('INSERT INTO conflicts(id,path,base_content,local_content,remote_content,remote_commit,created_at) VALUES(?,?,?,?,?,?,?)').run(randomBytes(12).toString('hex'), row.path, row.base_content, row.local_content, remoteContent, entry?.sha ?? '', now());
-    this.database.db.prepare('DELETE FROM pending WHERE path=?').run(row.path);
-  }
-
-  private async applyRemote(fullName: string, branch: string, remote: Map<string, { path: string; sha: string; size?: number }>) {
-    const pending = new Set((this.database.db.prepare('SELECT path FROM pending').all() as Array<{ path: string }>).map((row) => row.path));
-    const conflicts = new Set((this.database.db.prepare('SELECT path FROM conflicts').all() as Array<{ path: string }>).map((row) => row.path));
-    const local = new Map((this.database.db.prepare('SELECT path,revision,remote_sha,updated_at FROM notes').all() as NoteRow[]).map((note) => [note.path, note]));
-    const changed = [...remote.values()].filter((entry) => !local.has(entry.path) || local.get(entry.path)?.remote_sha !== entry.sha).filter((entry) => !pending.has(entry.path) && !conflicts.has(entry.path));
-    this.totalFiles = Math.max(this.totalFiles, changed.length);
-    for (const entry of changed) {
-      this.currentPath = entry.path;
-      if (!isText(entry.path)) {
-        await this.files.remove(entry.path);
-        this.database.db.prepare('INSERT OR REPLACE INTO notes(path,revision,updated_at,remote_sha) VALUES(?,?,?,?)').run(entry.path, hash(entry.path), now(), entry.sha);
-        this.processedFiles += 1;
-        continue;
-      }
-      const data = await this.github.raw(fullName, entry.path, branch);
-      await this.files.write(entry.path, data);
-      const content = data.toString('utf8');
-      this.database.db.prepare('INSERT OR REPLACE INTO notes(path,revision,updated_at,remote_sha) VALUES(?,?,?,?)').run(entry.path, hash(content || entry.path), now(), entry.sha);
-      this.processedFiles += 1;
-    }
-    for (const path of local.keys()) {
-      if (!remote.has(path) && !pending.has(path) && !conflicts.has(path)) {
-        await this.files.remove(path);
-        this.database.db.prepare('DELETE FROM notes WHERE path=?').run(path);
-      }
-    }
-  }
-
-  private async activate(staging: string, notes: NoteRow[]) {
-    const root = this.files.storePath();
-    const backup = join(this.files.dataRoot(), 'backup', `store-${Date.now()}`);
-    await fs.mkdir(dirname(backup), { recursive: true });
-    const hadRoot = existsSync(root);
-    try {
-      if (hadRoot) await fs.rename(root, backup);
-      await fs.rename(staging, root);
-    } catch (error) {
-      if (hadRoot && !existsSync(root) && existsSync(backup)) await fs.rename(backup, root);
-      throw error;
-    }
-    const pending = this.database.db.prepare('SELECT path,op,base_blob,base_content,local_content FROM pending').all() as PendingRow[];
-    const transaction = this.database.db.transaction(() => {
-      this.database.db.prepare('DELETE FROM notes').run();
-      const insert = this.database.db.prepare('INSERT INTO notes(path,revision,updated_at,remote_sha) VALUES(?,?,?,?)');
-      for (const note of notes) insert.run(note.path, note.revision, note.updated_at, note.remote_sha);
-      this.repository.markInitialized();
-    });
-    transaction();
-    for (const row of pending) {
-      if (row.op === 'delete') {
-        await this.files.remove(row.path);
-        this.database.db.prepare('DELETE FROM notes WHERE path=?').run(row.path);
-      } else {
-        await this.files.writeIn(root, row.path, Buffer.from(row.local_content ?? '', 'utf8'));
-        const remoteSha = (this.database.db.prepare('SELECT remote_sha FROM notes WHERE path=?').get(row.path) as { remote_sha?: string } | undefined)?.remote_sha ?? null;
-        this.database.db.prepare('INSERT OR REPLACE INTO notes(path,revision,updated_at,remote_sha) VALUES(?,?,?,?)').run(row.path, hash(row.local_content ?? ''), now(), remoteSha);
-      }
-    }
-    await fs.rm(join(this.files.dataRoot(), 'git'), { recursive: true, force: true });
+  applyConflictDecisions() {
+    const rows = this.database.db.prepare('SELECT * FROM conflicts WHERE resolution_action IS NOT NULL').all() as Array<Record<string, string | null>>;
+    for (const row of rows) this.applyDecision(row);
+    this.schedule();
+    return this.status();
   }
 
   async ensureAsset(path: string) {
@@ -347,28 +137,243 @@ export class SyncService implements OnModuleInit {
     if (this.files.exists(safe)) return;
     const fullName = this.repository.get();
     if (!fullName || !this.github.hasToken()) throw new UnauthorizedException('请先连接 GitHub');
-    let branch = this.repository.branch();
-    if (!branch) {
-      branch = (await this.github.repository(fullName)).default_branch;
-      this.repository.setBranch(branch);
-    }
+    const branch = this.repository.branch() || (await this.github.repository(fullName)).default_branch;
     const data = await this.github.raw(fullName, safe, branch);
     await this.files.write(safe, data);
   }
 
-  private updateRemoteSha(path: string, sha: string, content: string) {
-    this.database.db.prepare('INSERT OR REPLACE INTO notes(path,revision,updated_at,remote_sha) VALUES(?,?,?,?)').run(path, hash(content), now(), sha);
+  private async bootstrap() {
+    await this.migrateLegacyRows();
+    const row = this.workspace();
+    if (row.state === 'syncing') this.setWorkspace({ state: this.countDirty() ? 'pending' : 'checking', phase: 'idle', lock_token: '', lock_until: '' });
+    this.triggerSync();
   }
 
-  private count(table: 'pending' | 'conflicts') {
-    return (this.database.db.prepare(`SELECT count(*) c FROM ${table}`).get() as { c: number }).c;
+  private async migrateLegacyRows() {
+    const rows = this.database.db.prepare('SELECT * FROM notes WHERE id IS NULL OR content IS NULL OR remote_path IS NULL').all() as NoteRow[];
+    for (const row of rows) {
+      const content = row.content ?? (isText(row.path) ? await this.files.readText(row.path).catch(() => null) : null);
+      this.database.db.prepare('UPDATE notes SET id=COALESCE(id,?),content=COALESCE(content,?),revision=CASE WHEN content IS NULL AND ? IS NOT NULL THEN ? ELSE revision END,remote_path=COALESCE(remote_path,path),base_content=COALESCE(base_content,?),title=COALESCE(title,?),dirty=COALESCE(dirty,0),deleted=COALESCE(deleted,0) WHERE path=?').run(randomUUID(), content, content, content === null ? null : hash(content), content, noteTitle(row.path, content ?? ''), row.path);
+    }
+    const pending = this.database.db.prepare('SELECT path,op,base_content,local_content FROM pending').all() as Array<{ path: string; op: string; base_content: string | null; local_content: string | null }>;
+    const mark = this.database.db.transaction(() => {
+      for (const item of pending) {
+        const existing = this.database.db.prepare('SELECT id FROM notes WHERE path=?').get(item.path) as { id?: string } | undefined;
+        if (existing) this.database.db.prepare('UPDATE notes SET content=COALESCE(?,content),base_content=COALESCE(?,base_content),revision=?,dirty=1,deleted=? WHERE path=?').run(item.local_content, item.base_content, hash(item.local_content ?? ''), item.op === 'delete' ? 1 : 0, item.path);
+        else this.database.db.prepare('INSERT INTO notes(path,revision,updated_at,remote_sha,title,id,content,remote_path,base_content,dirty,deleted) VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(item.path, hash(item.local_content ?? ''), now(), null, noteTitle(item.path, item.local_content ?? ''), randomUUID(), item.local_content, null, item.base_content, 1, item.op === 'delete' ? 1 : 0);
+      }
+      if (pending.length) {
+        this.database.db.prepare('DELETE FROM pending').run();
+        this.bumpGeneration();
+      }
+      const invalid = (this.database.db.prepare('SELECT count(*) count FROM notes WHERE id IS NULL OR remote_path IS NULL').get() as { count: number }).count;
+      if (invalid) throw new Error('旧笔记迁移校验失败：存在缺少稳定标识或远端路径的记录');
+      this.database.db.prepare('INSERT OR REPLACE INTO schema_migrations(version,applied_at) VALUES(2,?)').run(now());
+    });
+    mark();
   }
 
-  private errorMessage(error: unknown) {
-    return error instanceof Error ? error.message : '同步失败';
+  private async run() {
+    const token = randomUUID();
+    if (!this.acquireLock(token)) return;
+    try {
+      const { fullName, branch } = await this.remote();
+      this.setWorkspace({ state: 'checking', phase: 'fetching', last_error: '', next_retry_at: '' });
+      let remote = await this.snapshot(fullName, branch);
+      await this.reconcileRemote(fullName, remote);
+      const claims = this.claims();
+      if (claims.length) {
+        this.setWorkspace({ state: 'syncing', phase: 'committing' });
+        const committed = await this.commitClaims(fullName, branch, remote, claims);
+        if (!committed) {
+          this.setWorkspace({ state: 'pending', phase: 'idle' });
+          this.requestRetry(0);
+          return;
+        }
+        remote = await this.snapshot(fullName, branch);
+        this.setWorkspace({ state: 'syncing', phase: 'verifying', last_remote_head: remote.head });
+        await this.verifyAndAcknowledge(fullName, remote, claims);
+        await this.reconcileRemote(fullName, remote);
+      }
+      this.finish(remote.head);
+    } catch (error) {
+      this.fail(error);
+    } finally {
+      this.releaseLock(token);
+    }
   }
 
-  private finishJob(error: string | null) {
-    if (this.jobId) this.database.db.prepare('UPDATE sync_jobs SET state=?,phase=?,error=?,updated_at=? WHERE id=?').run(this.state, this.phase, error, now(), this.jobId);
+  private async remote() {
+    await this.github.user();
+    const fullName = this.repository.get();
+    const meta = await this.github.repository(fullName);
+    this.repository.setBranch(meta.default_branch);
+    return { fullName, branch: meta.default_branch };
   }
+
+  private async snapshot(fullName: string, branch: string): Promise<RemoteSnapshot> {
+    const head = await this.github.head(fullName, branch);
+    const commit = await this.github.commit(fullName, head);
+    const entries = (await this.github.tree(fullName, head)).filter((entry) => entry.type === 'blob' && this.paths.allowed(entry.path));
+    this.setWorkspace({ last_remote_head: head });
+    return { head, treeSha: commit.tree.sha, entries: new Map(entries.map((entry) => [entry.path, entry])) };
+  }
+
+  private async reconcileRemote(fullName: string, remote: RemoteSnapshot) {
+    this.setWorkspace({ phase: 'merging' });
+    const local = this.database.db.prepare('SELECT * FROM notes').all() as NoteRow[];
+    const byRemote = new Map(local.filter((note) => note.remote_path).map((note) => [note.remote_path!, note]));
+    for (const [path, entry] of remote.entries) {
+      const note = byRemote.get(path);
+      if (!note) {
+        const content = isText(path) ? (await this.github.raw(fullName, path, remote.head)).toString('utf8') : null;
+        this.database.db.prepare('INSERT OR IGNORE INTO notes(path,revision,updated_at,remote_sha,title,id,content,remote_path,base_content,dirty,deleted) VALUES(?,?,?,?,?,?,?,?,?,?,0)').run(path, hash(content ?? path), now(), entry.sha, noteTitle(path, content ?? ''), randomUUID(), content, path, content, 0);
+        continue;
+      }
+      if ((note.remote_sha === entry.sha && note.content !== null) || !isText(path)) continue;
+      const content = (await this.github.raw(fullName, path, remote.head)).toString('utf8');
+      if (note.dirty && note.base_content !== content) this.makeConflict(note, content, entry.sha, remote.head);
+      else this.database.db.prepare('UPDATE notes SET path=?,content=?,revision=?,remote_sha=?,remote_path=?,base_content=?,title=?,dirty=0,deleted=0,updated_at=? WHERE id=?').run(path, content, hash(content), entry.sha, path, content, noteTitle(path, content), now(), note.id);
+    }
+    for (const note of local) {
+      if (!note.remote_path || remote.entries.has(note.remote_path)) continue;
+      if (note.dirty) this.makeConflict(note, null, '', remote.head);
+      else this.database.db.prepare('DELETE FROM notes WHERE id=?').run(note.id);
+    }
+  }
+
+  private makeConflict(note: NoteRow, remoteContent: string | null, remoteSha: string, remoteHead: string) {
+    const copyPath = this.conflictPath(note.path, this.workspace().device_id, note.revision);
+    const transaction = this.database.db.transaction(() => {
+      this.database.db.prepare('INSERT OR IGNORE INTO conflicts(id,path,base_content,local_content,remote_content,remote_commit,created_at,operation,resolution_copy_path) VALUES(?,?,?,?,?,?,?,?,?)').run(randomUUID(), note.path, note.base_content, note.content, remoteContent, remoteHead, now(), 'update', copyPath);
+      if (remoteContent === null) this.database.db.prepare('UPDATE notes SET deleted=1,dirty=0,updated_at=? WHERE id=?').run(now(), note.id);
+      else this.database.db.prepare('UPDATE notes SET path=remote_path,content=?,revision=?,base_content=?,remote_sha=?,dirty=0,deleted=0,title=?,updated_at=? WHERE id=?').run(remoteContent, hash(remoteContent), remoteContent, remoteSha, noteTitle(note.remote_path ?? note.path, remoteContent), now(), note.id);
+      this.database.db.prepare('INSERT OR IGNORE INTO notes(path,revision,updated_at,remote_sha,title,id,content,remote_path,base_content,dirty,deleted) VALUES(?,?,?,?,?,?,?,?,?,?,0)').run(copyPath, note.revision, now(), null, noteTitle(copyPath, note.content ?? ''), randomUUID(), note.content, null, null, 1);
+      this.bumpGeneration();
+    });
+    transaction();
+  }
+
+  private async commitClaims(fullName: string, branch: string, remote: RemoteSnapshot, claims: Claim[]) {
+    const operations: Array<{ path: string; sha: string | null }> = [];
+    for (const claim of claims) {
+      if (claim.deleted) {
+        if (claim.remote_path && remote.entries.has(claim.remote_path)) operations.push({ path: claim.remote_path, sha: null });
+        continue;
+      }
+      const blob = await this.github.createBlob(fullName, claim.content ?? '');
+      operations.push({ path: claim.path, sha: blob });
+      if (claim.remote_path && claim.remote_path !== claim.path && remote.entries.has(claim.remote_path)) operations.push({ path: claim.remote_path, sha: null });
+    }
+    if (!operations.length) return true;
+    const tree = await this.github.createTree(fullName, remote.treeSha, operations);
+    const commit = await this.github.createCommit(fullName, `noteai: sync ${claims.length} note${claims.length > 1 ? 's' : ''}`, tree, remote.head);
+    return this.github.updateRef(fullName, branch, commit);
+  }
+
+  private async verifyAndAcknowledge(fullName: string, remote: RemoteSnapshot, claims: Claim[]) {
+    const verified = new Map<string, string>();
+    for (const claim of claims) {
+      const entry = remote.entries.get(claim.path);
+      if (claim.deleted) {
+        if (claim.remote_path && remote.entries.has(claim.remote_path)) continue;
+        verified.set(claim.id, '');
+      } else if (entry) {
+        const remoteContent = (await this.github.raw(fullName, claim.path, remote.head)).toString('utf8');
+        if (hash(remoteContent) === claim.revision) verified.set(claim.id, entry.sha);
+      }
+    }
+    const acknowledge = this.database.db.transaction(() => {
+      for (const claim of claims) {
+        if (!verified.has(claim.id)) continue;
+        if (claim.deleted) this.database.db.prepare('DELETE FROM notes WHERE id=? AND revision=? AND dirty=1 AND deleted=1').run(claim.id, claim.revision);
+        else this.database.db.prepare('UPDATE notes SET dirty=0,remote_path=path,remote_sha=?,base_content=content,updated_at=? WHERE id=? AND revision=? AND dirty=1').run(verified.get(claim.id), now(), claim.id, claim.revision);
+      }
+    });
+    acknowledge();
+  }
+
+  private finish(head: string) {
+    const dirty = this.countDirty();
+    const conflicts = this.countConflicts();
+    const workspace = this.workspace();
+    if (dirty) {
+      this.setWorkspace({ state: conflicts ? 'conflict' : 'pending', phase: 'idle', last_remote_head: head });
+      this.requestRetry(0);
+    }
+    else if (conflicts) this.setWorkspace({ state: 'conflict', phase: 'completed', last_remote_head: head });
+    else this.setWorkspace({ state: 'verified', phase: 'completed', last_remote_head: head, verified_remote_head: head, verified_generation: workspace.generation, verified_at: now(), last_error: '', next_retry_at: '' });
+  }
+
+  private fail(error: unknown) {
+    const attempts = (this.database.db.prepare("SELECT count(*) count FROM sync_runs WHERE state='failed'").get() as { count: number }).count;
+    const delay = retryDelays[Math.min(attempts, retryDelays.length - 1)];
+    const next = new Date(Date.now() + delay).toISOString();
+    const message = error instanceof Error ? error.message : '同步失败';
+    this.setWorkspace({ state: this.countConflicts() ? 'conflict' : 'failed', phase: 'failed', last_error: message, next_retry_at: next });
+    this.database.db.prepare('INSERT INTO sync_runs(state,error,created_at) VALUES(?,?,?)').run('failed', message, now());
+    this.requestRetry(delay);
+  }
+
+  private requestRetry(delay: number) {
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      void this.triggerSync();
+    }, delay);
+  }
+
+  private applyDecision(row: Record<string, string | null>) {
+    const action = row.resolution_action as ConflictAction;
+    const copy = row.resolution_copy_path;
+    if (action === 'use-remote' && copy) this.database.db.prepare('UPDATE notes SET dirty=1,deleted=1,revision=?,updated_at=? WHERE path=?').run(hash(`delete:${copy}:${now()}`), now(), copy);
+    if ((action === 'keep-local' || action === 'manual') && copy) {
+      const local = this.database.db.prepare('SELECT * FROM notes WHERE path=? AND deleted=0').get(copy) as NoteRow | undefined;
+      const content = action === 'manual' ? row.resolution_content ?? '' : local?.content ?? row.local_content ?? '';
+      const original = this.database.db.prepare('SELECT id FROM notes WHERE path=? AND deleted=0').get(row.path) as { id: string } | undefined;
+      if (original) this.database.db.prepare('UPDATE notes SET content=?,revision=?,title=?,dirty=1,deleted=0,updated_at=? WHERE id=?').run(content, hash(content), noteTitle(row.path ?? '', content), now(), original.id);
+      if (local) this.database.db.prepare('UPDATE notes SET deleted=1,dirty=1,revision=?,updated_at=? WHERE id=?').run(hash(`delete:${local.id}:${now()}`), now(), local.id);
+    }
+    this.database.db.prepare('DELETE FROM conflicts WHERE id=?').run(row.id);
+  }
+
+  private claims() {
+    return this.database.db.prepare('SELECT id,path,remote_path,content,revision,deleted FROM notes WHERE dirty=1 ORDER BY updated_at,id').all() as Claim[];
+  }
+
+  private conflictPath(path: string, device: string, revision: string) {
+    const extension = extname(path) || '.md';
+    const directory = dirname(path);
+    const name = path.slice(directory === '.' ? 0 : directory.length + 1, -extension.length);
+    return `${directory === '.' ? '' : `${directory}/`}${name}（冲突-${device.slice(0, 6)}-${revision.slice(0, 8)}）${extension}`;
+  }
+
+  private workspace() {
+    return this.database.db.prepare('SELECT * FROM sync_workspace WHERE id=1').get() as WorkspaceRow;
+  }
+
+  private setWorkspace(values: Partial<WorkspaceRow>) {
+    const entries = Object.entries({ ...values, updated_at: now() });
+    this.database.db.prepare(`UPDATE sync_workspace SET ${entries.map(([key]) => `${key}=?`).join(',')} WHERE id=1`).run(...entries.map(([, value]) => value));
+  }
+
+  private bumpGeneration() { this.database.db.prepare('UPDATE sync_workspace SET generation=generation+1,updated_at=? WHERE id=1').run(now()); }
+  private countDirty() { return (this.database.db.prepare('SELECT count(*) count FROM notes WHERE dirty=1').get() as { count: number }).count; }
+  private countConflicts() { return (this.database.db.prepare('SELECT count(*) count FROM conflicts').get() as { count: number }).count; }
+  private countDecisions() { return (this.database.db.prepare('SELECT count(*) count FROM conflicts WHERE resolution_action IS NOT NULL').get() as { count: number }).count; }
+  private derivedState(workspace: WorkspaceRow, dirty: number, conflicts: number): SyncState {
+    if (!this.repository.get()) return 'unconfigured';
+    if (!this.github.hasToken()) return 'unauthorized';
+    if (workspace.lock_until && workspace.lock_until > now()) return workspace.phase === 'fetching' ? 'checking' : 'syncing';
+    if (conflicts) return 'conflict';
+    if (dirty) return workspace.state === 'failed' ? 'failed' : 'pending';
+    return workspace.verified_generation === workspace.generation && workspace.verified_remote_head ? 'verified' : 'checking';
+  }
+
+  private acquireLock(token: string) {
+    const until = new Date(Date.now() + 5 * 60_000).toISOString();
+    const result = this.database.db.prepare("UPDATE sync_workspace SET lock_token=?,lock_until=?,state='checking',phase='fetching',updated_at=? WHERE id=1 AND (lock_until='' OR lock_until<?)").run(token, until, now(), now());
+    return result.changes === 1;
+  }
+  private releaseLock(token: string) { this.database.db.prepare("UPDATE sync_workspace SET lock_token='',lock_until='',updated_at=? WHERE id=1 AND lock_token=?").run(now(), token); }
 }

@@ -1,5 +1,32 @@
-export type SyncState = 'unconfigured' | 'unauthorized' | 'initializing' | 'pending' | 'syncing' | 'synced' | 'conflict' | 'failed';
-export type SyncPhase = 'idle' | 'validating-auth' | 'validating-repository' | 'loading-tree' | 'downloading' | 'activating' | 'uploading' | 'refreshing' | 'completed' | 'failed';
-export type PendingOperation = 'create' | 'update' | 'delete';
-export type PendingRow = { path: string; op: PendingOperation; base_blob: string | null; base_content: string | null; local_content: string | null };
-export type NoteRow = { path: string; revision: string; remote_sha: string | null; updated_at: string };
+export type SyncState = 'unconfigured' | 'unauthorized' | 'checking' | 'pending' | 'syncing' | 'verified' | 'conflict' | 'failed';
+export type SyncPhase = 'idle' | 'fetching' | 'merging' | 'committing' | 'verifying' | 'completed' | 'failed';
+
+export type NoteRow = {
+  id: string;
+  path: string;
+  revision: string;
+  updated_at: string;
+  title: string | null;
+  content: string | null;
+  remote_path: string | null;
+  remote_sha: string | null;
+  base_content: string | null;
+  dirty: number;
+  deleted: number;
+};
+
+export type WorkspaceRow = {
+  generation: number;
+  verified_generation: number;
+  last_remote_head: string;
+  verified_remote_head: string;
+  verified_at: string;
+  state: SyncState;
+  phase: SyncPhase;
+  last_error: string;
+  next_retry_at: string;
+  lock_token: string;
+  lock_until: string;
+  device_id: string;
+  updated_at: string;
+};

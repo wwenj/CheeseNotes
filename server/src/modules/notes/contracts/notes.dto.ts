@@ -1,6 +1,10 @@
 import { IsOptional, IsString } from 'class-validator';
 
 export class SaveNoteDto {
+  @IsOptional()
+  @IsString()
+  id?: string;
+
   @IsString()
   path!: string;
 
@@ -13,9 +17,17 @@ export class SaveNoteDto {
 }
 
 export class DeleteNoteDto {
+  @IsOptional()
+  @IsString()
+  id?: string;
   @IsString()
   path!: string;
 
   @IsString()
   revision!: string;
+}
+
+export class CreateFolderDto {
+  @IsString()
+  path!: string;
 }

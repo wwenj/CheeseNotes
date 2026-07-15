@@ -97,5 +97,5 @@ export function Progress({ sync }: { sync: SyncStatus }) {
 }
 
 function phaseIndex(phase: SyncStatus['phase']) {
-  return ({ 'validating-auth': 0, 'validating-repository': 0, 'loading-tree': 1, downloading: 2, activating: 3, completed: 3 } as Partial<Record<SyncStatus['phase'], number>>)[phase] ?? -1;
+  return ({ fetching: 0, merging: 1, committing: 2, verifying: 3, completed: 3 } as Partial<Record<SyncStatus['phase'], number>>)[phase] ?? -1;
 }

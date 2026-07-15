@@ -11,9 +11,18 @@ import { fileKind, resolveVaultPath } from '../lib/files';
 type MarkerRange = { from: number; to: number };
 type ImagePreview = { alt: string; src: string };
 type ImageLine = ImagePreview & { from: number; to: number };
+export type LiveListMarker = {
+  kind: 'unordered' | 'ordered' | 'task';
+  level: number;
+  from: number;
+  to: number;
+  number?: string;
+  checked?: boolean;
+};
 
 const hiddenMarker = Decoration.replace({});
 const visibleMarker = Decoration.mark({ class: 'cm-md-syntax' });
+const visibleListMarker = Decoration.mark({ class: 'cm-md-syntax cm-md-list-syntax' });
 const visibleStrongMarker = Decoration.mark({ class: 'cm-md-syntax cm-md-strong' });
 const visibleEmphasisMarker = Decoration.mark({ class: 'cm-md-syntax cm-md-emphasis' });
 const visibleStrikethroughMarker = Decoration.mark({ class: 'cm-md-syntax cm-md-strikethrough' });
@@ -41,6 +50,41 @@ class ImagePreviewWidget extends WidgetType {
   }
 }
 
+class ListMarkerWidget extends WidgetType {
+  constructor(private readonly marker: LiveListMarker) { super(); }
+
+  eq(other: ListMarkerWidget) {
+    return other.marker.kind === this.marker.kind
+      && other.marker.level === this.marker.level
+      && other.marker.number === this.marker.number
+      && other.marker.checked === this.marker.checked;
+  }
+
+  toDOM() {
+    const wrapper = document.createElement('span');
+    wrapper.className = `cm-live-list-marker cm-live-${this.marker.kind}-marker cm-live-list-level-${Math.min(this.marker.level, 3)}`;
+    wrapper.setAttribute('aria-hidden', 'true');
+
+    if (this.marker.kind === 'ordered') {
+      wrapper.textContent = `${this.marker.number}.`;
+      return wrapper;
+    }
+
+    if (this.marker.kind === 'task') {
+      const checkbox = document.createElement('span');
+      checkbox.className = this.marker.checked ? 'cm-live-task-checkbox is-checked' : 'cm-live-task-checkbox';
+      checkbox.textContent = this.marker.checked ? '✓' : '';
+      wrapper.append(checkbox);
+      return wrapper;
+    }
+
+    const glyph = document.createElement('span');
+    glyph.className = 'cm-live-list-glyph';
+    wrapper.append(glyph);
+    return wrapper;
+  }
+}
+
 export function imagePreviewForLine(line: string, sourcePath: string, files: NoteSummary[]): ImagePreview | null {
   const value = line.trim();
   let alt = '';
@@ -56,6 +100,20 @@ export function imagePreviewForLine(line: string, sourcePath: string, files: Not
   const path = resolveVaultPath(rawReference, sourcePath, files.map((file) => file.path));
   const file = path ? files.find((item) => item.path === path) : undefined;
   return path && fileKind(path) === 'image' ? { alt, src: notesApi.fileUrl(path, file?.assetVersion) } : null;
+}
+
+export function listMarkerForLine(line: string): LiveListMarker | null {
+  const match = line.match(/^([ \t]*)(?:([-*+])\s+(\[([ xX])\]\s+)?|(\d+)[.)]\s+)/);
+  if (!match) return null;
+
+  const indentation = match[1].replace(/\t/g, '    ').length;
+  const from = match[1].length;
+  const to = match[0].length;
+  const level = Math.floor(indentation / 4) + 1;
+
+  if (match[5]) return { kind: 'ordered', level, from, to, number: match[5] };
+  if (match[3]) return { kind: 'task', level, from, to, checked: match[4]?.toLowerCase() === 'x' };
+  return { kind: 'unordered', level, from, to };
 }
 
 const markdownHighlighting = HighlightStyle.define([
@@ -80,7 +138,19 @@ const liveEditorTheme = EditorView.theme({
   '.cm-line.cm-live-heading-1': { lineHeight: '1.2', letterSpacing: '-.055em' },
   '.cm-line.cm-live-empty-after-heading': { lineHeight: '.61em' },
   '.cm-line.cm-live-empty-paragraph': { lineHeight: '1.06em' },
-  '.cm-line.cm-live-list': { paddingLeft: '1.3em', textIndent: '-1.3em' },
+  '.cm-line.cm-live-list': { paddingLeft: '1.48em', textIndent: '-1.48em' },
+  '.cm-line.cm-live-ordered-list': { paddingLeft: '1.73em', textIndent: '-1.73em' },
+  '.cm-live-list-marker': { display: 'inline-flex', boxSizing: 'border-box', width: '1.48em', minWidth: '1.48em', height: '1em', marginLeft: '0', alignItems: 'center', justifyContent: 'flex-start', color: '#303135', verticalAlign: '-.03em', textIndent: '0', userSelect: 'none' },
+  '.cm-live-unordered-marker': { paddingLeft: '.36em' },
+  '.cm-live-list-level-2.cm-live-unordered-marker': { paddingLeft: '.32em' },
+  '.cm-live-list-level-3.cm-live-unordered-marker': { paddingLeft: '.37em' },
+  '.cm-live-list-glyph': { display: 'block', width: '.36em', height: '.36em', borderRadius: '50%', backgroundColor: '#303135' },
+  '.cm-live-list-level-2 .cm-live-list-glyph': { width: '.44em', height: '.44em', border: '1.2px solid #505359', backgroundColor: 'transparent' },
+  '.cm-live-list-level-3 .cm-live-list-glyph': { width: '.34em', height: '.34em', borderRadius: '1px', backgroundColor: '#303135' },
+  '.cm-live-ordered-marker': { width: '1.73em', minWidth: '1.73em', paddingRight: '.18em', justifyContent: 'flex-end', fontFamily: 'inherit', fontSize: '1em', fontVariantNumeric: 'normal', fontWeight: '400' },
+  '.cm-live-task-marker': { justifyContent: 'flex-start' },
+  '.cm-live-task-checkbox': { display: 'inline-grid', width: '.92em', height: '.92em', placeItems: 'center', border: '1px solid #74777c', borderRadius: '3px', color: '#fff', fontFamily: 'sans-serif', fontSize: '.7em', fontWeight: '700', lineHeight: '1' },
+  '.cm-live-task-checkbox.is-checked': { borderColor: '#505359', backgroundColor: '#505359' },
   '.cm-line.cm-live-quote': { margin: '.35em 0', padding: '.6em .9em', color: '#62646a', background: '#f7f7f7', borderRadius: '0 6px 6px 0', boxShadow: 'inset 3px 0 #b9babd' },
   '.cm-line.cm-live-code': { padding: '.1em .35em', color: '#a74d45', background: '#f5f4f3', borderRadius: '4px', fontFamily: 'SFMono-Regular, Menlo, Consolas, monospace', fontSize: '.86em' },
   '.cm-cursor, .cm-dropCursor': { borderLeftColor: '#252629' },
@@ -89,6 +159,8 @@ const liveEditorTheme = EditorView.theme({
   '.cm-activeLine': { backgroundColor: 'transparent' },
   '.cm-gutters': { display: 'none' },
   '.cm-md-syntax, .cm-md-syntax *': { color: '#8b93a1 !important' },
+  '.cm-md-list-syntax': { display: 'inline-block', boxSizing: 'border-box', width: '1.48em', minWidth: '1.48em', paddingLeft: '.36em', marginLeft: '0', verticalAlign: '-.03em', textIndent: '0' },
+  '.cm-line.cm-live-ordered-list .cm-md-list-syntax': { width: '1.73em', minWidth: '1.73em', paddingRight: '.18em', paddingLeft: '0', marginLeft: '0', textAlign: 'right' },
   '.cm-md-strong': { fontWeight: '700 !important' },
   '.cm-md-emphasis': { fontStyle: 'italic !important' },
   '.cm-md-strikethrough': { textDecoration: 'line-through !important' },
@@ -183,6 +255,7 @@ function imageLines(state: EditorState, sourcePath: string, files: NoteSummary[]
 function visibleMarkerFor(value: string) {
   const heading = value.match(/^(#{1,6})\s+$/);
   if (heading) return visibleHeadingMarkers[heading[1].length - 1];
+  if (/^(?:[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+)$/.test(value)) return visibleListMarker;
   if (value === '**' || value === '__') return visibleStrongMarker;
   if (value === '*' || value === '_') return visibleEmphasisMarker;
   if (value === '~~') return visibleStrikethroughMarker;
@@ -207,7 +280,11 @@ function livePreviewExtension(sourcePath: string, files: NoteSummary[]) {
       const images = imageLines(view.state, sourcePath, files);
       for (const range of markdownSyntaxRanges(content)) {
         const isActive = range.to > active.from && range.from < active.to;
+        const line = view.state.doc.lineAt(range.from);
+        const listMarker = listMarkerForLine(line.text);
+        const isListMarker = listMarker !== null && range.from === line.from + listMarker.from && range.to === line.from + listMarker.to;
         if (isActive) builder.push(visibleMarkerFor(content.slice(range.from, range.to)).range(range.from, range.to));
+        else if (isListMarker && listMarker) builder.push(Decoration.replace({ widget: new ListMarkerWidget(listMarker), inclusive: false }).range(range.from, range.to));
         else if (!images.some((image) => range.from < image.to && range.to > image.from)) builder.push(hiddenMarker.range(range.from, range.to));
       }
       for (const image of images) {
@@ -226,7 +303,9 @@ function livePreviewExtension(sourcePath: string, files: NoteSummary[]) {
         const next = lineNumber < view.state.doc.lines ? view.state.doc.line(lineNumber + 1).text : '';
         const previousHeading = /^\s*#{1,6}\s+/.test(previous);
         const nextHeading = /^\s*#{1,6}\s+/.test(next);
-        const className = heading ? `cm-live-heading cm-live-heading-${heading[1].length}` : !line.text && previousHeading && !nextHeading ? 'cm-live-empty-after-heading' : !line.text && previous && next && !previousHeading && !nextHeading ? 'cm-live-empty-paragraph' : /^\s*(?:[-*+] |\d+[.)] )/.test(line.text) ? 'cm-live-list' : /^>\s?/.test(line.text) ? 'cm-live-quote' : /^\s*```/.test(line.text) ? 'cm-live-code' : '';
+        const listMarker = listMarkerForLine(line.text);
+        const listClass = listMarker ? `cm-live-list cm-live-${listMarker.kind}-list` : '';
+        const className = heading ? `cm-live-heading cm-live-heading-${heading[1].length}` : !line.text && previousHeading && !nextHeading ? 'cm-live-empty-after-heading' : !line.text && previous && next && !previousHeading && !nextHeading ? 'cm-live-empty-paragraph' : listClass ? listClass : /^>\s?/.test(line.text) ? 'cm-live-quote' : /^\s*```/.test(line.text) ? 'cm-live-code' : '';
         if (className) builder.push(Decoration.line({ class: className }).range(line.from));
       }
       return Decoration.set(builder, true);

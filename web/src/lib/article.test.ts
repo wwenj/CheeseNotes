@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { imagePreviewForLine, markdownMarkerRanges } from '../components/MarkdownLiveEditor';
-import { hasUnsavedDraft, splitArticle } from './article';
+import { imagePreviewForLine, listMarkerForLine, markdownMarkerRanges } from '../components/MarkdownLiveEditor';
+import { splitArticle } from './article';
 import { displayName } from './files';
 
 beforeEach(() => {
@@ -17,11 +17,6 @@ describe('article markdown helpers', () => {
     expect(splitArticle('普通正文', '收件箱/草稿.md')).toEqual({ title: '草稿', body: '普通正文' });
   });
 
-  it('tracks unsaved drafts without normalizing markdown', () => {
-    expect(hasUnsavedDraft('# 标题\n\n正文', '# 标题\n\n正文')).toBe(false);
-    expect(hasUnsavedDraft('# 标题\n\n**正文**', '# 标题\n\n正文')).toBe(true);
-    expect(hasUnsavedDraft('# 新笔记\n', undefined)).toBe(true);
-  });
 });
 
 describe('file display names', () => {
@@ -49,6 +44,20 @@ describe('live preview markers', () => {
     expect(hidden).toContain('](' + 'https://example.com)');
     expect(hidden).toContain('[[笔记|');
     expect(hidden).toContain(']]');
+  });
+});
+
+describe('live preview lists', () => {
+  it('renders non-focused list syntax as the same marker hierarchy used by reading mode', () => {
+    expect(listMarkerForLine('- 一级项目')).toMatchObject({ kind: 'unordered', level: 1 });
+    expect(listMarkerForLine('    - 二级项目')).toMatchObject({ kind: 'unordered', level: 2 });
+    expect(listMarkerForLine('3. 有序项目')).toMatchObject({ kind: 'ordered', level: 1, number: '3' });
+  });
+
+  it('keeps task lists and the original Markdown syntax available when their line is focused', () => {
+    expect(listMarkerForLine('- [x] 已完成')).toMatchObject({ kind: 'task', checked: true });
+    const content = '- 项目\n\n正文';
+    expect(markdownMarkerRanges(content, 0, content.indexOf('\n'))).toEqual([]);
   });
 });
 

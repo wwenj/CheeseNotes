@@ -28,8 +28,38 @@ export function displayName(path: string) {
   return extensionStart > 0 ? name.slice(0, extensionStart) : name;
 }
 
-export function buildTree(files: NoteSummary[]): TreeNode[] {
+export function treeTitle(file: NoteSummary) {
+  return file.title?.trim() || displayName(file.path);
+}
+
+export function folderPaths(files: NoteSummary[], folders: string[] = []) {
+  const paths = new Set<string>();
+  for (const folder of folders) {
+    const parts = folder.split('/').filter(Boolean);
+    for (let index = 1; index <= parts.length; index += 1) paths.add(parts.slice(0, index).join('/'));
+  }
+  for (const file of files) {
+    const parts = file.path.split('/').filter(Boolean);
+    for (let index = 1; index < parts.length; index += 1) paths.add(parts.slice(0, index).join('/'));
+  }
+  return [...paths].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+}
+
+export function buildTree(files: NoteSummary[], folders: string[] = []): TreeNode[] {
   const root: TreeNode = { name: '', path: '', folder: true, children: [] };
+  for (const folder of folderPaths([], folders)) {
+    const parts = folder.split('/').filter(Boolean);
+    let parent = root;
+    parts.forEach((name, index) => {
+      const path = parts.slice(0, index + 1).join('/');
+      let node = parent.children.find((item) => item.name === name && item.folder);
+      if (!node) {
+        node = { name, path, folder: true, children: [] };
+        parent.children.push(node);
+      }
+      parent = node;
+    });
+  }
   for (const file of files) {
     const parts = file.path.split('/').filter(Boolean);
     let parent = root;

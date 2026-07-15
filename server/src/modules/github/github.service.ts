@@ -5,7 +5,7 @@ import { wait } from '../../common/time.js';
 import { DatabaseService } from '../database/database.service.js';
 import type { RepoMeta, TreeEntry } from './contracts/github.types.js';
 
-class GitHubError extends Error {
+export class GitHubError extends Error {
   constructor(readonly status: number, message: string) {
     super(message);
   }
@@ -63,6 +63,49 @@ export class GitHubService {
     };
     await visit(root.sha);
     return entries;
+  }
+
+  async head(fullName: string, branch: string) {
+    const result = await this.json<{ object: { sha: string } }>(`/repos/${fullName}/git/ref/heads/${encodeURIComponent(branch)}`);
+    return result.object.sha;
+  }
+
+  async commit(fullName: string, sha: string) {
+    return this.json<{ tree: { sha: string } }>(`/repos/${fullName}/git/commits/${sha}`);
+  }
+
+  async createBlob(fullName: string, content: string) {
+    const result = await this.json<{ sha: string }>(`/repos/${fullName}/git/blobs`, {
+      method: 'POST', body: JSON.stringify({ content, encoding: 'utf-8' }),
+    });
+    return result.sha;
+  }
+
+  async createTree(fullName: string, baseTree: string, entries: Array<{ path: string; sha: string | null }>) {
+    const result = await this.json<{ sha: string }>(`/repos/${fullName}/git/trees`, {
+      method: 'POST',
+      body: JSON.stringify({ base_tree: baseTree, tree: entries.map((entry) => ({ path: entry.path, mode: '100644', type: 'blob', sha: entry.sha })) }),
+    });
+    return result.sha;
+  }
+
+  async createCommit(fullName: string, message: string, tree: string, parent: string) {
+    const result = await this.json<{ sha: string }>(`/repos/${fullName}/git/commits`, {
+      method: 'POST', body: JSON.stringify({ message, tree, parents: [parent] }),
+    });
+    return result.sha;
+  }
+
+  async updateRef(fullName: string, branch: string, sha: string) {
+    try {
+      await this.json(`/repos/${fullName}/git/refs/heads/${encodeURIComponent(branch)}`, {
+        method: 'PATCH', body: JSON.stringify({ sha, force: false }),
+      });
+      return true;
+    } catch (error) {
+      if (error instanceof GitHubError && error.status === 422) return false;
+      throw error;
+    }
   }
 
   async raw(fullName: string, path: string, ref: string) {

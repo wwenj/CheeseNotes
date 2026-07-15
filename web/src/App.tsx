@@ -3,14 +3,15 @@ import { LoaderCircle } from 'lucide-react';
 import type { NoteSummary } from './api';
 import { useWorkspaceController } from './app/useWorkspaceController';
 import { navigate, panelForRoute, pathForPanel, useAppRoute } from './app/routes';
-import type { Panel, PendingNavigation } from './app/types';
+import type { Panel } from './app/types';
 import Toast from './components/feedback/Toast';
 import WorkspaceShell from './components/layout/WorkspaceShell';
-import { ArticleActionSheet, ArticleToolbar, DocumentView, Editor, UnsavedChangesPrompt } from './features/reader/ReaderViews';
+import type { ExplorerTool } from './components/layout/ExplorerTools';
+import { ArticleActionSheet, ArticleToolbar, DocumentView } from './features/reader/ReaderViews';
 import RepositorySettings from './features/settings/RepositorySettings';
 import SyncPanel from './features/sync/SyncPanel';
 import { ConnectGitHub, InitializationProgress, RepositoryPicker, SetupScreen } from './features/setup/SetupScreens';
-import { displayName, isMarkdown } from './lib/files';
+import { isMarkdown } from './lib/files';
 
 const ArticleEditor = lazy(() => import('./features/reader/ArticleEditor'));
 
@@ -20,59 +21,98 @@ export default function App() {
   const workspace = useWorkspaceController();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [openExplorerOnReturn, setOpenExplorerOnReturn] = useState(false);
-  const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation | null>(null);
-
-  const requestNavigation = useCallback((label: string, proceed: () => void) => {
-    if (workspace.hasUnsavedChanges) {
-      setPendingNavigation({ label, proceed });
-      return;
-    }
-    proceed();
-  }, [workspace.hasUnsavedChanges]);
+  const [activeExplorerTool, setActiveExplorerTool] = useState<ExplorerTool | null>(null);
+  const [search, setSearch] = useState('');
 
   const navigateToPanel = useCallback((nextPanel: Panel) => {
     const nextPath = pathForPanel(nextPanel);
-    const label = nextPanel === 'sync' ? '打开同步状态' : nextPanel === 'settings' ? '打开设置' : '返回笔记库';
-    requestNavigation(label, () => {
-      if (nextPanel !== 'vault') workspace.resetEditor();
-      setDrawerOpen(false);
-      navigate(nextPath);
-    });
-  }, [requestNavigation, workspace.resetEditor]);
+    if (nextPanel !== 'vault') workspace.resetEditor();
+    setDrawerOpen(false);
+    navigate(nextPath);
+  }, [workspace.resetEditor]);
 
   const closeSettingsToExplorer = useCallback(() => {
-    requestNavigation('返回笔记库', () => {
-      workspace.resetEditor();
-      setOpenExplorerOnReturn(true);
-      navigate('/');
-    });
-  }, [requestNavigation, workspace.resetEditor]);
+    workspace.resetEditor();
+    setOpenExplorerOnReturn(true);
+    navigate('/');
+  }, [workspace.resetEditor]);
 
   const openFile = useCallback((file: NoteSummary) => {
-    requestNavigation(`打开「${displayName(file.path)}」`, () => {
-      setDrawerOpen(false);
-      navigate('/');
-      void workspace.loadFile(file);
-    });
-  }, [requestNavigation, workspace.loadFile]);
+    setDrawerOpen(false);
+    navigate('/');
+    void workspace.loadFile(file);
+  }, [workspace.loadFile]);
 
   const openNew = useCallback(() => {
-    requestNavigation('新建笔记', () => {
-      setDrawerOpen(false);
-      navigate('/');
-      workspace.createDraft();
-    });
-  }, [requestNavigation, workspace.createDraft]);
+    setDrawerOpen(false);
+    navigate('/');
+    void workspace.createNote();
+  }, [workspace.createNote]);
 
   const openDocumentPath = useCallback((path: string) => {
     const file = workspace.files.find((item) => item.path === path);
     if (file) openFile(file);
   }, [openFile, workspace.files]);
 
+  const closeExplorerTool = useCallback(() => {
+    setActiveExplorerTool(null);
+    setSearch('');
+  }, []);
+
+  const changeExplorerTool = useCallback((tool: ExplorerTool | null) => {
+    const next = activeExplorerTool === tool ? null : tool;
+    setActiveExplorerTool(next);
+    if (next !== 'search') setSearch('');
+  }, [activeExplorerTool]);
+
+  const openNewFromExplorer = useCallback(() => {
+    closeExplorerTool();
+    openNew();
+  }, [closeExplorerTool, openNew]);
+
+  const selectFileFromSearch = useCallback((file: NoteSummary) => {
+    closeExplorerTool();
+    openFile(file);
+  }, [closeExplorerTool, openFile]);
+
+  const revealFolderFromSearch = useCallback((path: string) => {
+    closeExplorerTool();
+    setDrawerOpen(false);
+    navigate('/');
+    workspace.revealFolder(path);
+  }, [closeExplorerTool, workspace.revealFolder]);
+
   useEffect(() => {
     if (route.pathname !== '/') workspace.resetEditor();
     setDrawerOpen(false);
-  }, [route.pathname, workspace.resetEditor]);
+    closeExplorerTool();
+  }, [closeExplorerTool, route.pathname, workspace.resetEditor]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && activeExplorerTool) {
+        closeExplorerTool();
+        return;
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setSearch('');
+        setActiveExplorerTool('search');
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [activeExplorerTool, closeExplorerTool]);
+
+  useEffect(() => {
+    if (activeExplorerTool !== 'search' || search.trim()) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (event.target instanceof Element && event.target.closest('[data-explorer-tools]')) return;
+      closeExplorerTool();
+    };
+    document.addEventListener('pointerdown', closeOnOutsidePointer);
+    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer);
+  }, [activeExplorerTool, closeExplorerTool, search]);
 
   useEffect(() => {
     if (!openExplorerOnReturn || route.pathname !== '/') return;
@@ -104,19 +144,26 @@ export default function App() {
   if (workspace.loading && !workspace.auth) return <SetupScreen><LoaderCircle className="spin" size={21} />正在读取本地设置</SetupScreen>;
   if (!workspace.auth?.authenticated) return <SetupScreen feedback={feedback}><ConnectGitHub error={workspace.error} /></SetupScreen>;
   if (!workspace.repository) return <SetupScreen feedback={feedback}><RepositoryPicker login={workspace.auth.login} onSelect={workspace.chooseRepository} /></SetupScreen>;
-  if (workspace.sync?.state === 'initializing' && workspace.sync) return <SetupScreen feedback={feedback}><InitializationProgress sync={workspace.sync} onRetry={workspace.runSync} /></SetupScreen>;
+  if (workspace.sync?.state === 'checking' && workspace.sync && !workspace.files.length) return <SetupScreen feedback={feedback}><InitializationProgress sync={workspace.sync} onRetry={workspace.runSync} /></SetupScreen>;
 
   const explorer = {
     files: workspace.files,
+    folders: workspace.folders,
     selectedPath: workspace.selected?.path,
     expanded: workspace.expanded,
-    search: workspace.search,
+    search,
+    activeTool: activeExplorerTool,
     sync: workspace.sync,
     panel,
-    onSearch: workspace.setSearch,
+    onSearch: setSearch,
+    onToolChange: changeExplorerTool,
     onToggle: workspace.toggleFolder,
     onCollapseAll: workspace.collapseAllFolders,
-    onSelect: openFile,
+    onExpandAll: workspace.expandAllFolders,
+    onRevealFolder: revealFolderFromSearch,
+    onSelect: activeExplorerTool === 'search' ? selectFileFromSearch : openFile,
+    onNewFile: openNewFromExplorer,
+    onCreateFolder: workspace.createFolder,
     onPanel: navigateToPanel,
     onSync: workspace.runSync,
   };
@@ -126,44 +173,24 @@ export default function App() {
     : null;
   const vaultContent = editingArticle
     ? workspace.articleMode === 'write'
-      ? <Suspense fallback={<div className="document-loading" role="status"><LoaderCircle className="spin" size={20} /></div>}><ArticleEditor draft={editingArticle.draft} readerFontSize={workspace.clientSettings.readerFontSize} sourcePath={editingArticle.selected.path} files={workspace.files} onChange={(content) => workspace.setDraft((current) => current ? { ...current, content } : current)} onSave={() => void workspace.saveDraft()} /></Suspense>
+      ? <Suspense fallback={<div className="document-loading" role="status"><LoaderCircle className="spin" size={20} /></div>}><ArticleEditor key={editingArticle.selected.path} draft={editingArticle.draft} readerFontSize={workspace.clientSettings.readerFontSize} sourcePath={editingArticle.selected.path} files={workspace.files} onChange={workspace.updateDraftContent} onSave={() => { void workspace.flushCurrentDraft(); }} /></Suspense>
       : <DocumentView selected={editingArticle.selected} note={{ ...editingArticle.note, content: editingArticle.draft.content }} files={workspace.files} loading={workspace.loading || workspace.loadingFile} readerFontSize={workspace.clientSettings.readerFontSize} onOpen={openDocumentPath} onNew={openNew} />
-    : workspace.draft
-      ? <Editor draft={workspace.draft} onChange={workspace.setDraft} onSave={() => void workspace.saveDraft()} onDelete={workspace.deleteDraft} onCancel={() => workspace.setDraft(null)} />
-      : <DocumentView selected={workspace.selected} note={workspace.note} files={workspace.files} loading={workspace.loading || workspace.loadingFile} readerFontSize={workspace.clientSettings.readerFontSize} onOpen={openDocumentPath} onNew={openNew} />;
+    : <DocumentView selected={workspace.selected} note={workspace.note} files={workspace.files} loading={workspace.loading || workspace.loadingFile} readerFontSize={workspace.clientSettings.readerFontSize} onOpen={openDocumentPath} onNew={openNew} />;
 
   const content = panel === 'vault' ? vaultContent
-    : panel === 'sync' ? <SyncPanel sync={workspace.sync} onSync={workspace.runSync} onRefresh={() => void workspace.reload(false)} onError={workspace.setError} />
+    : panel === 'sync' ? <SyncPanel sync={workspace.sync} onSync={workspace.runSync} onSyncStatus={workspace.setSync} onRefresh={() => void workspace.reload(false, { preserveCurrentDocument: true, forceTreeRefresh: true })} onError={workspace.setError} onClose={closeSettingsToExplorer} />
       : <RepositorySettings repository={workspace.repository} auth={workspace.auth} readerFontSize={workspace.clientSettings.readerFontSize} onReaderFontSizeChange={workspace.setReaderFontSize} onClearReadingCache={workspace.clearReadingCache} onDisconnect={workspace.disconnect} onClose={closeSettingsToExplorer} />;
-
-  const pendingPrompt = pendingNavigation && <UnsavedChangesPrompt
-    label={pendingNavigation.label}
-    onCancel={() => setPendingNavigation(null)}
-    onDiscard={() => {
-      const next = pendingNavigation;
-      setPendingNavigation(null);
-      workspace.resetEditor();
-      next.proceed();
-    }}
-    onSave={() => void workspace.saveDraft().then((saved) => {
-      if (!saved) return;
-      const next = pendingNavigation;
-      setPendingNavigation(null);
-      next.proceed();
-    })}
-  />;
 
   return <WorkspaceShell
     explorer={explorer}
     drawerOpen={drawerOpen}
     onDrawerOpen={() => setDrawerOpen(true)}
     onDrawerClose={() => setDrawerOpen(false)}
-    showMobileMenu={panel !== 'settings'}
+    showMobileMenu={panel === 'vault'}
     feedback={feedback}
     toolbar={panel === 'vault' && workspace.note && isMarkdown(workspace.selected?.path ?? '') ? <ArticleToolbar articleMode={workspace.articleMode} refreshState={workspace.documentRefresh} onToggle={() => void workspace.changeArticleMode(workspace.articleMode === 'read' ? 'write' : 'read')} onOpenMenu={() => workspace.setSheetOpen(true)} onRetry={workspace.retryDocumentUpdate} /> : null}
   >
     {content}
     {workspace.sheetOpen && workspace.note && <ArticleActionSheet mode={workspace.articleMode} onClose={() => workspace.setSheetOpen(false)} onModeChange={(mode) => void workspace.changeArticleMode(mode)} onCopy={() => void workspace.copyArticle()} onFavorite={() => { workspace.setSheetOpen(false); workspace.setNotice('收藏功能即将支持。'); }} onDelete={() => void workspace.deleteCurrentArticle()} />}
-    {pendingPrompt}
   </WorkspaceShell>;
 }

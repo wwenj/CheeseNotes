@@ -2,12 +2,24 @@ import 'reflect-metadata';
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
-import fastifyStatic from '@fastify/static';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { existsSync, promises as fs } from 'node:fs';
-import { resolve } from 'node:path';
+import { extname, resolve } from 'node:path';
 import { AppModule } from './app.module.js';
 import { runtimeConfig } from './config/runtime.config.js';
+
+const assetContentTypes: Record<string, string> = {
+  '.css': 'text/css; charset=utf-8',
+  '.gif': 'image/gif',
+  '.js': 'text/javascript; charset=utf-8',
+  '.jpeg': 'image/jpeg',
+  '.jpg': 'image/jpeg',
+  '.png': 'image/png',
+  '.svg': 'image/svg+xml',
+  '.webp': 'image/webp',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+};
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, new FastifyAdapter({ logger: true }), { rawBody: true });
@@ -18,16 +30,25 @@ async function bootstrap() {
   const publicDir = resolve(process.cwd(), 'public');
   if (existsSync(publicDir)) {
     const fastify = app.getHttpAdapter().getInstance();
-    const indexHtml = await fs.readFile(resolve(publicDir, 'index.html'));
-    await fastify.register(fastifyStatic, {
-      root: publicDir,
-      prefix: '/',
-      wildcard: false,
-      index: false,
-      maxAge: '1y',
-      immutable: true,
+    const indexPath = resolve(publicDir, 'index.html');
+    fastify.get('/assets/:file', async (request: FastifyRequest<{ Params: { file: string } }>, reply: FastifyReply) => {
+      const { file } = request.params;
+      if (!/^[\w.-]+$/.test(file)) return reply.code(404).send({ statusCode: 404, error: 'Not Found' });
+      try {
+        const asset = await fs.readFile(resolve(publicDir, 'assets', file));
+        return reply
+          .type(assetContentTypes[extname(file).toLowerCase()] ?? 'application/octet-stream')
+          .header('Cache-Control', 'public, max-age=31536000, immutable')
+          .send(asset);
+      } catch {
+        return reply.code(404).send({ statusCode: 404, error: 'Not Found' });
+      }
     });
-    fastify.get('/*', (request: FastifyRequest, reply: FastifyReply) => {
+    fastify.get('/noteai-icon.png', async (_request: FastifyRequest, reply: FastifyReply) => {
+      const icon = await fs.readFile(resolve(publicDir, 'noteai-icon.png'));
+      return reply.type('image/png').header('Cache-Control', 'public, max-age=31536000, immutable').send(icon);
+    });
+    fastify.get('/*', async (request: FastifyRequest, reply: FastifyReply) => {
       if (request.url === '/api' || request.url.startsWith('/api/')) {
         return reply.code(404).send({
           statusCode: 404,
@@ -35,6 +56,7 @@ async function bootstrap() {
           message: `Cannot ${request.method} ${request.url}`,
         });
       }
+      const indexHtml = await fs.readFile(indexPath);
       return reply.type('text/html').header('Cache-Control', 'no-cache').send(indexHtml);
     });
   }

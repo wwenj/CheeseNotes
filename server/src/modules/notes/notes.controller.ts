@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, Inject, Post, Put, Query, Req, Res } fro
 import { createReadStream, promises as fs } from 'node:fs';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { hash } from '../../common/crypto.js';
-import { DeleteNoteDto, SaveNoteDto } from './contracts/notes.dto.js';
+import { CreateFolderDto, DeleteNoteDto, SaveNoteDto } from './contracts/notes.dto.js';
 import { NoteService } from './note.service.js';
 
 export function parseByteRange(value: string | undefined, size: number) {
@@ -22,11 +22,12 @@ export class NotesController {
   constructor(@Inject(NoteService) private readonly notes: NoteService) {}
 
   @Get('tree')
-  tree(@Req() request: FastifyRequest, @Res() reply: FastifyReply) {
-    const tree = this.notes.tree();
-    const etag = `"${hash(JSON.stringify(tree.map((file) => [file.path, file.revision, file.assetVersion])))}"`;
+  async tree(@Query('includeFolders') includeFolders: string | undefined, @Req() request: FastifyRequest, @Res() reply: FastifyReply) {
+    const tree = await this.notes.tree();
+    const payload = includeFolders === '1' ? tree : tree.files;
+    const etag = `"${hash(JSON.stringify(payload))}"`;
     if (request.headers['if-none-match'] === etag) return reply.code(304).header('ETag', etag).header('Cache-Control', 'private, max-age=0, must-revalidate').send();
-    return reply.header('ETag', etag).header('Cache-Control', 'private, max-age=0, must-revalidate').send(tree);
+    return reply.header('ETag', etag).header('Cache-Control', 'private, max-age=0, must-revalidate').send(payload);
   }
 
   @Get('notes/content')
@@ -66,16 +67,21 @@ export class NotesController {
 
   @Post('notes')
   create(@Body() dto: SaveNoteDto) {
-    return this.notes.save(dto.path, dto.content);
+    return this.notes.save(dto.path, dto.content, undefined, dto.id);
+  }
+
+  @Post('folders')
+  createFolder(@Body() dto: CreateFolderDto) {
+    return this.notes.createFolder(dto.path);
   }
 
   @Put('notes')
   update(@Body() dto: SaveNoteDto) {
-    return this.notes.save(dto.path, dto.content, dto.revision);
+    return this.notes.save(dto.path, dto.content, dto.revision, dto.id);
   }
 
   @Delete('notes')
   remove(@Body() dto: DeleteNoteDto) {
-    return this.notes.remove(dto.path, dto.revision);
+    return this.notes.remove(dto.path, dto.revision, dto.id);
   }
 }

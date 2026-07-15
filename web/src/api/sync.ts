@@ -1,8 +1,8 @@
 import { request } from './http';
 
 export type SyncStatus = {
-  state: 'unconfigured' | 'unauthorized' | 'initializing' | 'pending' | 'syncing' | 'synced' | 'conflict' | 'failed';
-  phase: 'idle' | 'validating-auth' | 'validating-repository' | 'loading-tree' | 'downloading' | 'activating' | 'uploading' | 'refreshing' | 'completed' | 'failed';
+  state: 'unconfigured' | 'unauthorized' | 'checking' | 'pending' | 'syncing' | 'verified' | 'conflict' | 'failed';
+  phase: 'idle' | 'fetching' | 'merging' | 'committing' | 'verifying' | 'completed' | 'failed';
   currentPath: string;
   processedFiles: number;
   totalFiles: number;
@@ -10,19 +10,59 @@ export type SyncStatus = {
   totalBytes: number;
   pendingCount: number;
   conflictCount: number;
+  resolutionDraftCount: number;
+  syncBlockedByConflicts: boolean;
   lastSuccessAt: string;
   lastError: string;
   manualSyncAvailable: boolean;
+  dirtyCount?: number;
+  lastRemoteHead?: string;
+  verifiedRemoteHead?: string;
+  localGeneration?: number;
+  verifiedGeneration?: number;
+  nextRetryAt?: string;
 };
 
-export type SyncConflict = { id: string; path: string; remote_commit: string; created_at: string };
-export type ConflictDetail = SyncConflict & { base_content: string | null; local_content: string | null; remote_content: string | null };
+export type ConflictAction = 'keep-both' | 'keep-local' | 'use-remote' | 'manual';
+export type ConflictOperation = 'create' | 'update' | 'delete';
+export type ConflictDecision = { action: ConflictAction; content?: string | null; copyPath?: string | null };
+export type SyncConflict = {
+  id: string;
+  path: string;
+  remote_commit: string;
+  created_at: string;
+  operation: ConflictOperation;
+  resolution_action: ConflictAction | null;
+  resolution_copy_path: string | null;
+  local_bytes: number;
+  remote_bytes: number;
+};
+export type ConflictDetail = SyncConflict & {
+  base_content: string | null;
+  local_content: string | null;
+  remote_content: string | null;
+  resolution_content: string | null;
+  resolution_updated_at: string | null;
+};
+export type ConflictPage = { items: SyncConflict[]; nextCursor: string | null; total: number; resolutionDraftCount: number };
+export type ConflictReview = 'all' | 'undecided' | 'decided';
 
 export const syncApi = {
   status: () => request<SyncStatus>('sync/status'),
   run: () => request<SyncStatus>('sync', { method: 'POST' }),
   health: () => request<{ ok: boolean }>('health'),
-  conflicts: () => request<SyncConflict[]>('sync/conflicts'),
+  conflicts: (options: { cursor?: string; limit?: number; query?: string; review?: ConflictReview } = {}) => {
+    const params = new URLSearchParams();
+    if (options.cursor) params.set('cursor', options.cursor);
+    if (options.limit) params.set('limit', String(options.limit));
+    if (options.query?.trim()) params.set('q', options.query.trim());
+    if (options.review && options.review !== 'all') params.set('review', options.review);
+    const suffix = params.size ? `?${params}` : '';
+    return request<ConflictPage>(`sync/conflicts${suffix}`);
+  },
   conflict: (id: string) => request<ConflictDetail>(`sync/conflicts/${id}`),
-  resolve: (id: string, action: 'keep-both' | 'keep-local' | 'use-remote' | 'manual', content?: string) => request<{ ok: boolean; sync: SyncStatus }>(`sync/conflicts/${id}/resolve`, { method: 'POST', body: JSON.stringify({ action, ...(content === undefined ? {} : { content }) }) }),
+  saveDecision: (id: string, action: ConflictAction, content?: string) => request<{ ok: boolean; conflict: ConflictDetail; sync: SyncStatus }>(`sync/conflicts/${id}/decision`, { method: 'PUT', body: JSON.stringify({ action, ...(content === undefined ? {} : { content }) }) }),
+  saveAllDecisions: (action: Exclude<ConflictAction, 'manual'>) => request<{ ok: boolean; sync: SyncStatus }>('sync/conflicts/decisions', { method: 'PUT', body: JSON.stringify({ action }) }),
+  clearDecision: (id: string) => request<{ ok: boolean; conflict: ConflictDetail; sync: SyncStatus }>(`sync/conflicts/${id}/decision`, { method: 'PUT', body: JSON.stringify({ clear: true }) }),
+  applyDecisions: () => request<SyncStatus>('sync/conflicts/apply-decisions', { method: 'POST' }),
 };

@@ -10,7 +10,7 @@ npm run start:dev
 
 GitHub OAuth 凭据仅保存在 `server/config/github-oauth.local.json`，该文件被 Git 忽略。首次部署时从 `server/config/github-oauth.example.json` 复制并填写本地、生产两套 OAuth App 信息；客户端只需点击连接 GitHub，不需要也不会接触 Client Secret。GitHub OAuth App 的 Authorization callback URL 分别使用配置文件中的 `authorizationCallbackUrl`。
 
-服务只读取仓库当前默认分支，不会 clone Git 历史；笔记先保存到本机，再异步调用 GitHub API 同步。本地开发数据在 `note-service/.runtime`，Docker 内固定为 `/var/lib/note-service`。授权成功后的 GitHub Access Token 仅明文保存在当前服务本机的 SQLite 中，不会返回或存入 Web 页面。
+服务只读取仓库当前默认分支，不会 clone Git 历史。文本笔记先在 SQLite 事务中持久化，再由单一同步 Worker 以 GitHub Git Data API 原子提交并逐字节回读验证；未验证前不会显示“已同步”。文件系统只缓存媒体资源和旧数据迁移来源。本地开发数据在 `note-service/.runtime`，Docker 内固定为 `/var/lib/note-service`。授权成功后的 GitHub Access Token 仅明文保存在当前服务本机的 SQLite 中，不会返回或存入 Web 页面。
 
 服务端模块划分、依赖方向和接口契约见 [server/ARCHITECTURE.md](server/ARCHITECTURE.md)。
 
