@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState, type TouchEvent } from 'react';
 import { ArrowLeft, ChevronRight, CircleHelp, Github, Info, SlidersHorizontal, Type, X } from 'lucide-react';
 import type { GitHubAuth } from '../../api';
 import { defaultClientSettings } from '../../app/constants';
@@ -10,6 +10,7 @@ type RepositorySettingsProps = {
   auth: GitHubAuth;
   readerFontSize: number;
   onReaderFontSizeChange: (value: number) => void;
+  onClearReadingCache: () => Promise<void>;
   onDisconnect: () => Promise<void>;
   onClose: () => void;
 };
@@ -36,10 +37,12 @@ function SettingsPageHeader({ title, onBack, onClose }: { title: string; onBack?
   </header>;
 }
 
-export default function RepositorySettings({ repository, auth, readerFontSize, onReaderFontSizeChange, onDisconnect, onClose }: RepositorySettingsProps) {
+export default function RepositorySettings({ repository, auth, readerFontSize, onReaderFontSizeChange, onClearReadingCache, onDisconnect, onClose }: RepositorySettingsProps) {
   const [page, setPage] = useState<SettingsPage>('menu');
   const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [clearingCache, setClearingCache] = useState(false);
+  const detailSwipeStart = useRef<{ x: number; y: number } | null>(null);
 
   const confirmDisconnect = async () => {
     setDisconnecting(true);
@@ -50,9 +53,44 @@ export default function RepositorySettings({ repository, auth, readerFontSize, o
     }
   };
 
+  const clearReadingCache = async () => {
+    setClearingCache(true);
+    try {
+      await onClearReadingCache();
+    } finally {
+      setClearingCache(false);
+    }
+  };
+
   const goBack = () => {
     setConfirmingDisconnect(false);
     setPage('menu');
+  };
+
+  const handleDetailTouchStart = (event: TouchEvent<HTMLElement>) => {
+    detailSwipeStart.current = null;
+    if (event.touches.length !== 1 || page === 'menu') return;
+    const target = event.target as HTMLElement;
+    if (target.closest('button, input, textarea, select')) return;
+    const touch = event.touches[0];
+    detailSwipeStart.current = { x: touch.clientX, y: touch.clientY };
+  };
+
+  const handleDetailTouchEnd = (event: TouchEvent<HTMLElement>) => {
+    const start = detailSwipeStart.current;
+    detailSwipeStart.current = null;
+    if (!start || event.changedTouches.length !== 1) return;
+
+    const touch = event.changedTouches[0];
+    const distanceX = touch.clientX - start.x;
+    const distanceY = touch.clientY - start.y;
+    if (Math.abs(distanceX) < 72 || Math.abs(distanceX) <= Math.abs(distanceY) * 1.25) return;
+
+    // 左滑满足设置页的快捷返回；保留 iOS 左边缘右滑的常规返回方式。
+    if (distanceX < 0 || (start.x <= 32 && distanceX > 0)) {
+      event.preventDefault();
+      goBack();
+    }
   };
 
   if (page === 'menu') return <section className="settings-view settings-menu-view">
@@ -67,24 +105,29 @@ export default function RepositorySettings({ repository, auth, readerFontSize, o
     </div>
   </section>;
 
-  if (page === 'reader') return <section className="settings-view settings-detail-view">
+  if (page === 'reader') return <section className="settings-view settings-detail-view" onTouchStart={handleDetailTouchStart} onTouchEnd={handleDetailTouchEnd}>
     <SettingsPageHeader title="阅读与编辑" onBack={goBack} onClose={onClose} />
     <main className="settings-detail-content">
       <p className="settings-group-label">阅读</p>
       <section className="settings-detail-group">
         <div className="settings-detail-heading"><span className="settings-menu-icon"><Type size={20} strokeWidth={1.8} /></span><div><h2>正文字号</h2><p>只影响文章阅读页，不影响编辑器。</p></div><output>{readerFontSize}<small>px</small></output></div>
-        <label className="reader-size-control"><input type="range" min="14" max="20" step="1" value={readerFontSize} onChange={(event) => onReaderFontSizeChange(Number(event.target.value))} aria-label="文章正文字号" /><span><small>紧凑</small><button type="button" onClick={() => onReaderFontSizeChange(defaultClientSettings.readerFontSize)}>恢复默认</button><small>宽松</small></span></label>
+        <label className="reader-size-control"><input type="range" min="14" max="20" step="1" value={readerFontSize} onInput={(event) => onReaderFontSizeChange(Number(event.currentTarget.value))} aria-label="文章正文字号" /><span><small>紧凑</small><button type="button" onClick={() => onReaderFontSizeChange(defaultClientSettings.readerFontSize)}>恢复默认</button><small>宽松</small></span></label>
       </section>
     </main>
   </section>;
 
-  if (page === 'repository') return <section className="settings-view settings-detail-view">
+  if (page === 'repository') return <section className="settings-view settings-detail-view" onTouchStart={handleDetailTouchStart} onTouchEnd={handleDetailTouchEnd}>
     <SettingsPageHeader title="仓库与同步" onBack={goBack} onClose={onClose} />
     <main className="settings-detail-content">
       <p className="settings-group-label">当前连接</p>
       <section className="settings-detail-group">
         <div className="settings-detail-row"><span>GitHub 账户</span><strong>{auth.login}</strong></div>
         <div className="settings-detail-row"><span>笔记仓库</span><code>{repository}</code></div>
+      </section>
+      <p className="settings-group-label">本地缓存</p>
+      <section className="settings-detail-group">
+        <div className="settings-detail-heading"><span className="settings-menu-icon"><Info size={20} strokeWidth={1.8} /></span><div><h2>阅读缓存</h2><p>清除已缓存的文章和图片，不会影响 GitHub 仓库。</p></div></div>
+        <button type="button" className="settings-quiet-button" disabled={clearingCache} onClick={() => void clearReadingCache()}>{clearingCache ? '正在清除…' : '清除本地阅读缓存'}</button>
       </section>
       <p className="settings-group-label settings-danger-label">危险操作</p>
       <section className="settings-detail-group settings-danger-group">
@@ -96,7 +139,7 @@ export default function RepositorySettings({ repository, auth, readerFontSize, o
     </main>
   </section>;
 
-  return <section className="settings-view settings-detail-view">
+  return <section className="settings-view settings-detail-view" onTouchStart={handleDetailTouchStart} onTouchEnd={handleDetailTouchEnd}>
     <SettingsPageHeader title="关于 NoteAI" onBack={goBack} onClose={onClose} />
     <main className="settings-detail-content">
       <p className="settings-group-label">NoteAI</p>

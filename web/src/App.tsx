@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { LoaderCircle } from 'lucide-react';
 import type { NoteSummary } from './api';
 import { useWorkspaceController } from './app/useWorkspaceController';
@@ -6,11 +6,13 @@ import { navigate, panelForRoute, pathForPanel, useAppRoute } from './app/routes
 import type { Panel, PendingNavigation } from './app/types';
 import Toast from './components/feedback/Toast';
 import WorkspaceShell from './components/layout/WorkspaceShell';
-import { ArticleActionSheet, ArticleEditor, ArticleToolbar, DocumentView, Editor, UnsavedChangesPrompt } from './features/reader/ReaderViews';
+import { ArticleActionSheet, ArticleToolbar, DocumentView, Editor, UnsavedChangesPrompt } from './features/reader/ReaderViews';
 import RepositorySettings from './features/settings/RepositorySettings';
 import SyncPanel from './features/sync/SyncPanel';
 import { ConnectGitHub, InitializationProgress, RepositoryPicker, SetupScreen } from './features/setup/SetupScreens';
 import { displayName, isMarkdown } from './lib/files';
+
+const ArticleEditor = lazy(() => import('./features/reader/ArticleEditor'));
 
 export default function App() {
   const route = useAppRoute();
@@ -62,6 +64,11 @@ export default function App() {
     });
   }, [requestNavigation, workspace.createDraft]);
 
+  const openDocumentPath = useCallback((path: string) => {
+    const file = workspace.files.find((item) => item.path === path);
+    if (file) openFile(file);
+  }, [openFile, workspace.files]);
+
   useEffect(() => {
     if (route.pathname !== '/') workspace.resetEditor();
     setDrawerOpen(false);
@@ -90,7 +97,9 @@ export default function App() {
 
   const closeError = useCallback(() => workspace.setError(null), [workspace.setError]);
   const closeNotice = useCallback(() => workspace.setNotice(null), [workspace.setNotice]);
-  const feedback = <>{workspace.error && <Toast kind="error" value={workspace.error} onClose={closeError} />}{workspace.notice && <Toast kind="notice" value={workspace.notice} onClose={closeNotice} />}</>;
+  const feedback = workspace.error
+    ? <Toast key={`error:${workspace.error}`} kind="error" value={workspace.error} onClose={closeError} />
+    : workspace.notice ? <Toast key={`notice:${workspace.notice}`} kind="notice" value={workspace.notice} onClose={closeNotice} /> : null;
 
   if (workspace.loading && !workspace.auth) return <SetupScreen><LoaderCircle className="spin" size={21} />正在读取本地设置</SetupScreen>;
   if (!workspace.auth?.authenticated) return <SetupScreen feedback={feedback}><ConnectGitHub error={workspace.error} /></SetupScreen>;
@@ -106,6 +115,7 @@ export default function App() {
     panel,
     onSearch: workspace.setSearch,
     onToggle: workspace.toggleFolder,
+    onCollapseAll: workspace.collapseAllFolders,
     onSelect: openFile,
     onPanel: navigateToPanel,
     onSync: workspace.runSync,
@@ -116,15 +126,15 @@ export default function App() {
     : null;
   const vaultContent = editingArticle
     ? workspace.articleMode === 'write'
-      ? <ArticleEditor draft={editingArticle.draft} readerFontSize={workspace.clientSettings.readerFontSize} sourcePath={editingArticle.selected.path} files={workspace.files} onChange={(content) => workspace.setDraft((current) => current ? { ...current, content } : current)} onSave={() => void workspace.saveDraft()} />
-      : <DocumentView selected={editingArticle.selected} note={{ ...editingArticle.note, content: editingArticle.draft.content }} files={workspace.files} loading={workspace.loading || workspace.loadingFile} readerFontSize={workspace.clientSettings.readerFontSize} onOpen={(path) => { const file = workspace.files.find((item) => item.path === path); if (file) openFile(file); }} onNew={openNew} />
+      ? <Suspense fallback={<div className="document-loading" role="status"><LoaderCircle className="spin" size={20} /></div>}><ArticleEditor draft={editingArticle.draft} readerFontSize={workspace.clientSettings.readerFontSize} sourcePath={editingArticle.selected.path} files={workspace.files} onChange={(content) => workspace.setDraft((current) => current ? { ...current, content } : current)} onSave={() => void workspace.saveDraft()} /></Suspense>
+      : <DocumentView selected={editingArticle.selected} note={{ ...editingArticle.note, content: editingArticle.draft.content }} files={workspace.files} loading={workspace.loading || workspace.loadingFile} readerFontSize={workspace.clientSettings.readerFontSize} onOpen={openDocumentPath} onNew={openNew} />
     : workspace.draft
       ? <Editor draft={workspace.draft} onChange={workspace.setDraft} onSave={() => void workspace.saveDraft()} onDelete={workspace.deleteDraft} onCancel={() => workspace.setDraft(null)} />
-      : <DocumentView selected={workspace.selected} note={workspace.note} files={workspace.files} loading={workspace.loading || workspace.loadingFile} readerFontSize={workspace.clientSettings.readerFontSize} onOpen={(path) => { const file = workspace.files.find((item) => item.path === path); if (file) openFile(file); }} onNew={openNew} />;
+      : <DocumentView selected={workspace.selected} note={workspace.note} files={workspace.files} loading={workspace.loading || workspace.loadingFile} readerFontSize={workspace.clientSettings.readerFontSize} onOpen={openDocumentPath} onNew={openNew} />;
 
   const content = panel === 'vault' ? vaultContent
     : panel === 'sync' ? <SyncPanel sync={workspace.sync} onSync={workspace.runSync} onRefresh={() => void workspace.reload(false)} onError={workspace.setError} />
-      : <RepositorySettings repository={workspace.repository} auth={workspace.auth} readerFontSize={workspace.clientSettings.readerFontSize} onReaderFontSizeChange={workspace.setReaderFontSize} onDisconnect={workspace.disconnect} onClose={closeSettingsToExplorer} />;
+      : <RepositorySettings repository={workspace.repository} auth={workspace.auth} readerFontSize={workspace.clientSettings.readerFontSize} onReaderFontSizeChange={workspace.setReaderFontSize} onClearReadingCache={workspace.clearReadingCache} onDisconnect={workspace.disconnect} onClose={closeSettingsToExplorer} />;
 
   const pendingPrompt = pendingNavigation && <UnsavedChangesPrompt
     label={pendingNavigation.label}
@@ -150,7 +160,7 @@ export default function App() {
     onDrawerClose={() => setDrawerOpen(false)}
     showMobileMenu={panel !== 'settings'}
     feedback={feedback}
-    toolbar={panel === 'vault' && workspace.note && isMarkdown(workspace.selected?.path ?? '') ? <ArticleToolbar articleMode={workspace.articleMode} onToggle={() => void workspace.changeArticleMode(workspace.articleMode === 'read' ? 'write' : 'read')} onOpenMenu={() => workspace.setSheetOpen(true)} /> : null}
+    toolbar={panel === 'vault' && workspace.note && isMarkdown(workspace.selected?.path ?? '') ? <ArticleToolbar articleMode={workspace.articleMode} refreshState={workspace.documentRefresh} onToggle={() => void workspace.changeArticleMode(workspace.articleMode === 'read' ? 'write' : 'read')} onOpenMenu={() => workspace.setSheetOpen(true)} onRetry={workspace.retryDocumentUpdate} /> : null}
   >
     {content}
     {workspace.sheetOpen && workspace.note && <ArticleActionSheet mode={workspace.articleMode} onClose={() => workspace.setSheetOpen(false)} onModeChange={(mode) => void workspace.changeArticleMode(mode)} onCopy={() => void workspace.copyArticle()} onFavorite={() => { workspace.setSheetOpen(false); workspace.setNotice('收藏功能即将支持。'); }} onDelete={() => void workspace.deleteCurrentArticle()} />}

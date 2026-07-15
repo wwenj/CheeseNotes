@@ -1,9 +1,16 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { githubApi, notesApi, settingsApi, syncApi, type GitHubAuth, type Note, type NoteSummary, type SyncStatus } from '../api';
+import { apiUrl } from '../api/http';
 import type { ArticleMode, ClientSettings, Draft } from './types';
 import { clampReaderFontSize, clientSettingsKey, isSyncBusy, lastArticleKey, loadClientSettings, messageOf, newNotePath } from './constants';
 import { hasUnsavedDraft } from '../lib/article';
 import { isMarkdown, isText } from '../lib/files';
+import { clearCachedAssets, clearCachedWorkspace, readCachedDocument, readCachedWorkspace, removeCachedDocument, setCachedLastPath, writeCachedDocument, writeCachedWorkspace } from '../lib/workspace-cache';
+
+const workspaceKeyFor = (repository: string) => `${apiUrl('').replace(/\/api\/?$/, '')}::${repository}`;
+
+type LoadOptions = { workspaceKey?: string };
+type DocumentRefreshState = 'updating' | 'failed';
 
 export function useWorkspaceController() {
   const [auth, setAuth] = useState<GitHubAuth | null>(null);
@@ -17,11 +24,19 @@ export function useWorkspaceController() {
   const [sync, setSync] = useState<SyncStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingFile, setLoadingFile] = useState(false);
+  const [documentRefresh, setDocumentRefresh] = useState<{ path: string; state: DocumentRefreshState } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [clientSettings, setClientSettings] = useState<ClientSettings>(loadClientSettings);
   const [articleMode, setArticleMode] = useState<ArticleMode>('read');
   const [sheetOpen, setSheetOpen] = useState(false);
+  const selectedRef = useRef<NoteSummary | null>(null);
+  const repositoryRef = useRef<string | null>(null);
+  const loadSequence = useRef(0);
+  const loadAbort = useRef<AbortController | null>(null);
+
+  useEffect(() => { selectedRef.current = selected; }, [selected]);
+  useEffect(() => { repositoryRef.current = repository; }, [repository]);
 
   const reveal = useCallback((path: string) => {
     setExpanded((current) => {
@@ -32,24 +47,64 @@ export function useWorkspaceController() {
     });
   }, []);
 
-  const loadFile = useCallback(async (file: NoteSummary) => {
+  const loadFile = useCallback(async (file: NoteSummary, options: LoadOptions = {}) => {
+    const sequence = ++loadSequence.current;
+    loadAbort.current?.abort();
+    const controller = new AbortController();
+    loadAbort.current = controller;
+    setDocumentRefresh(null);
+    selectedRef.current = file;
     setSelected(file);
-    setNote(null);
     setDraft(null);
     setArticleMode('read');
     setSheetOpen(false);
     reveal(file.path);
-    if (!isText(file.path)) return;
-    if (isMarkdown(file.path)) localStorage.setItem(lastArticleKey, file.path);
+    if (!isText(file.path)) {
+      setNote(null);
+      setLoadingFile(false);
+      return;
+    }
 
+    const workspaceKey = options.workspaceKey ?? (repositoryRef.current ? workspaceKeyFor(repositoryRef.current) : null);
+    if (isMarkdown(file.path)) {
+      localStorage.setItem(lastArticleKey, file.path);
+      if (workspaceKey) void setCachedLastPath(workspaceKey, file.path);
+    }
+
+    const cached = workspaceKey ? await readCachedDocument(workspaceKey, file.path) : undefined;
+    if (sequence !== loadSequence.current) return;
+    if (cached) setNote({ path: cached.path, content: cached.content, revision: cached.revision });
+    else setNote(null);
+
+    if (cached?.revision && file.revision && cached.revision === file.revision) {
+      setLoadingFile(false);
+      setError(null);
+      return;
+    }
+
+    const needsCachedRefresh = Boolean(cached?.revision && file.revision && cached.revision !== file.revision);
+    if (needsCachedRefresh) setDocumentRefresh({ path: file.path, state: 'updating' });
     setLoadingFile(true);
     try {
-      setNote(await notesApi.content(file.path));
+      const fresh = await notesApi.content(file.path, controller.signal);
+      if (sequence !== loadSequence.current) return;
+      setNote(fresh);
+      if (workspaceKey) await writeCachedDocument(workspaceKey, fresh);
+      if (cached && cached.revision !== fresh.revision) setNotice('内容已更新为最新版本。');
+      setDocumentRefresh(null);
       setError(null);
     } catch (reason) {
-      setError(messageOf(reason));
+      if (controller.signal.aborted || sequence !== loadSequence.current) return;
+      if (needsCachedRefresh) {
+        setDocumentRefresh({ path: file.path, state: 'failed' });
+        setError('文档更新失败，当前显示的是缓存版本。');
+      } else if (cached) {
+        setError('文档加载失败，当前显示的是缓存版本。');
+      } else {
+        setError(messageOf(reason));
+      }
     } finally {
-      setLoadingFile(false);
+      if (sequence === loadSequence.current) setLoadingFile(false);
     }
   }, [reveal]);
 
@@ -59,26 +114,57 @@ export function useWorkspaceController() {
       const [nextAuth, config, nextSync] = await Promise.all([githubApi.auth(), settingsApi.repository(), syncApi.status()]);
       setAuth(nextAuth);
       setRepository(config.repository || null);
+      repositoryRef.current = config.repository || null;
       setSync(nextSync);
-      setFiles(config.repository ? await notesApi.tree() : []);
+      if (!config.repository) {
+        setFiles([]);
+        setError(null);
+        return;
+      }
+
+      const workspaceKey = workspaceKeyFor(config.repository);
+      const cachedWorkspace = await readCachedWorkspace(workspaceKey);
+      if (cachedWorkspace?.files.length) {
+        setFiles(cachedWorkspace.files);
+        const cachedLastPath = cachedWorkspace.lastPath || localStorage.getItem(lastArticleKey);
+        const cachedLast = cachedLastPath ? cachedWorkspace.files.find((file) => file.path === cachedLastPath && isMarkdown(file.path)) : undefined;
+        if (!selectedRef.current && cachedLast) void loadFile(cachedLast, { workspaceKey });
+      }
+
+      const nextTree = await notesApi.tree(cachedWorkspace?.etag ?? undefined);
+      if (nextTree.files) {
+        setFiles(nextTree.files);
+        const workspace = await writeCachedWorkspace(workspaceKey, nextTree.files, nextTree.etag);
+        const current = selectedRef.current;
+        if (current) {
+          const refreshed = nextTree.files.find((file) => file.path === current.path);
+          if (!refreshed) {
+            selectedRef.current = null;
+            setSelected(null);
+            setNote(null);
+          } else if (refreshed.revision !== current.revision || refreshed.assetVersion !== current.assetVersion) {
+            void loadFile(refreshed, { workspaceKey });
+          } else {
+            selectedRef.current = refreshed;
+            setSelected(refreshed);
+          }
+        } else {
+          const lastPath = workspace.lastPath || localStorage.getItem(lastArticleKey);
+          const lastArticle = lastPath ? nextTree.files.find((file) => file.path === lastPath && isMarkdown(file.path)) : undefined;
+          if (lastArticle) void loadFile(lastArticle, { workspaceKey });
+        }
+      }
       setError(null);
     } catch (reason) {
       setError(messageOf(reason));
     } finally {
       if (withLoading) setLoading(false);
     }
-  }, []);
+  }, [loadFile]);
 
   useEffect(() => {
     void reload();
   }, [reload]);
-
-  useEffect(() => {
-    if (selected || draft || !files.length) return;
-    const lastPath = localStorage.getItem(lastArticleKey);
-    const lastArticle = lastPath ? files.find((file) => file.path === lastPath && isMarkdown(file.path)) : undefined;
-    if (lastArticle) void loadFile(lastArticle);
-  }, [draft, files, loadFile, selected]);
 
   useEffect(() => {
     if (!isSyncBusy(sync)) return;
@@ -102,10 +188,13 @@ export function useWorkspaceController() {
       const result = nextDraft.revision
         ? await notesApi.update(nextDraft.path, nextDraft.content, nextDraft.revision)
         : await notesApi.create(nextDraft.path, nextDraft.content);
+      const saved = { path: result.path, content: nextDraft.content, revision: result.revision };
+      const workspaceKey = repositoryRef.current ? workspaceKeyFor(repositoryRef.current) : null;
+      if (workspaceKey) await writeCachedDocument(workspaceKey, saved);
       setDraft(null);
       setArticleMode('read');
       await reload(false);
-      await loadFile({ path: result.path });
+      await loadFile({ path: result.path, revision: result.revision }, { workspaceKey: workspaceKey ?? undefined });
       setNotice('已保存到本机，正在同步。');
       return true;
     } catch (reason) {
@@ -126,13 +215,27 @@ export function useWorkspaceController() {
       setSheetOpen(false);
       return;
     }
+    if (documentRefresh?.state === 'updating') {
+      setSheetOpen(false);
+      setNotice('文档正在更新，完成后可切换到写作模式。');
+      return;
+    }
     if (!note || !selected || !isMarkdown(selected.path)) return;
     if (!draft) setDraft({ path: selected.path, content: note.content, revision: note.revision });
     setArticleMode(nextMode);
     setSheetOpen(false);
-  }, [articleMode, draft, note, selected]);
+  }, [articleMode, documentRefresh?.state, draft, note, selected]);
+
+  const retryDocumentUpdate = useCallback(() => {
+    const current = selectedRef.current;
+    if (!current || !isText(current.path)) return;
+    setError(null);
+    void loadFile(current);
+  }, [loadFile]);
 
   const createDraft = useCallback(() => {
+    loadAbort.current?.abort();
+    selectedRef.current = null;
     setSelected(null);
     setNote(null);
     setArticleMode('read');
@@ -150,7 +253,10 @@ export function useWorkspaceController() {
     if (!draft?.revision || !window.confirm(`删除「${draft.path}」？`)) return;
     try {
       await notesApi.remove(draft.path, draft.revision);
+      const workspaceKey = repositoryRef.current ? workspaceKeyFor(repositoryRef.current) : null;
+      if (workspaceKey) await removeCachedDocument(workspaceKey, draft.path);
       setDraft(null);
+      selectedRef.current = null;
       setSelected(null);
       setNote(null);
       await reload(false);
@@ -173,8 +279,10 @@ export function useWorkspaceController() {
     try {
       const result = await settingsApi.saveRepository(value);
       setRepository(result.repository);
+      repositoryRef.current = result.repository;
       setSync(result.sync);
       setFiles([]);
+      selectedRef.current = null;
       setSelected(null);
       setNote(null);
       setDraft(null);
@@ -184,10 +292,21 @@ export function useWorkspaceController() {
     }
   }, []);
 
+  const clearReadingCache = useCallback(async () => {
+    const currentRepository = repositoryRef.current;
+    if (!currentRepository) return;
+    await clearCachedWorkspace(workspaceKeyFor(currentRepository));
+    await clearCachedAssets();
+    setNotice('已清除本地阅读缓存。');
+  }, []);
+
   const disconnect = useCallback(async () => {
+    const currentRepository = repositoryRef.current;
     try {
       setAuth(await githubApi.disconnect());
-      setNotice('已断开 GitHub，并清除了当前服务同步的本机内容。');
+      if (currentRepository) await clearCachedWorkspace(workspaceKeyFor(currentRepository));
+      await clearCachedAssets();
+      setNotice('已断开 GitHub，并清除了当前服务同步的本机内容和阅读缓存。');
       await reload(false);
     } catch (reason) {
       setError(messageOf(reason));
@@ -198,7 +317,10 @@ export function useWorkspaceController() {
     if (!selected || !note || !window.confirm(`删除「${selected.path}」？`)) return;
     try {
       await notesApi.remove(selected.path, note.revision);
+      const workspaceKey = repositoryRef.current ? workspaceKeyFor(repositoryRef.current) : null;
+      if (workspaceKey) await removeCachedDocument(workspaceKey, selected.path);
       setSheetOpen(false);
+      selectedRef.current = null;
       setSelected(null);
       setNote(null);
       setDraft(null);
@@ -237,6 +359,10 @@ export function useWorkspaceController() {
     });
   }, []);
 
+  const collapseAllFolders = useCallback(() => {
+    setExpanded(new Set());
+  }, []);
+
   return {
     auth,
     repository,
@@ -251,6 +377,7 @@ export function useWorkspaceController() {
     sync,
     loading,
     loadingFile,
+    documentRefresh: documentRefresh && documentRefresh.path === selected?.path ? documentRefresh.state : null,
     notice,
     setNotice,
     error,
@@ -262,6 +389,7 @@ export function useWorkspaceController() {
     hasUnsavedChanges,
     reload,
     loadFile,
+    retryDocumentUpdate,
     saveDraft,
     createDraft,
     resetEditor,
@@ -269,10 +397,12 @@ export function useWorkspaceController() {
     runSync,
     chooseRepository,
     disconnect,
+    clearReadingCache,
     deleteCurrentArticle,
     copyArticle,
     changeArticleMode,
     setReaderFontSize,
     toggleFolder,
+    collapseAllFolders,
   };
 }

@@ -54,7 +54,8 @@ export function imagePreviewForLine(line: string, sourcePath: string, files: Not
 
   if (/^(https?:|data:)/i.test(rawReference)) return { alt, src: rawReference };
   const path = resolveVaultPath(rawReference, sourcePath, files.map((file) => file.path));
-  return path && fileKind(path) === 'image' ? { alt, src: notesApi.fileUrl(path) } : null;
+  const file = path ? files.find((item) => item.path === path) : undefined;
+  return path && fileKind(path) === 'image' ? { alt, src: notesApi.fileUrl(path, file?.assetVersion) } : null;
 }
 
 const markdownHighlighting = HighlightStyle.define([

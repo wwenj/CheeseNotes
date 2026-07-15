@@ -1,0 +1,34 @@
+/* Media previews stay deliberately quiet; loading uses only a lightweight skeleton. */
+.asset-viewer { margin: 26px 0 0; }
+.asset-viewer--embedded { margin: 1.25em 0; }
+.asset-stage { position: relative; display: grid; min-width: 0; overflow: hidden; border: 0; border-radius: 10px; background: transparent; box-shadow: 0 4px 12px rgb(23 31 40 / .08); }
+.asset-stage--image { min-height: clamp(260px, 52vh, 620px); place-items: center; }
+.asset-stage--audio { min-height: 148px; place-items: center; padding: 28px; }
+.asset-stage--video { min-height: 260px; place-items: center; }
+.asset-stage--pdf { min-height: min(76vh, 890px); }
+.asset-media { position: relative; z-index: 1; max-width: 100%; transition: opacity .18s ease-out; }
+.asset-stage.is-loading .asset-media { opacity: 0; }
+.asset-stage .asset-image { display: block; width: auto; min-height: 0; max-height: min(72vh, 840px); margin: 0; border-radius: 0; background: transparent; object-fit: contain; }
+.asset-audio { width: min(100%, 720px); }
+.asset-video { display: block; width: 100%; max-height: min(72vh, 840px); aspect-ratio: 16 / 9; background: #171b20; object-fit: contain; }
+.asset-stage .asset-pdf { display: block; width: 100%; height: min(76vh, 890px); min-height: 520px; margin: 0; border: 0; border-radius: 0; background: transparent; }
+.asset-loading { position: absolute; z-index: 2; inset: 0; display: grid; place-items: center; padding: 28px; }
+.asset-loading__skeleton { display: grid; width: min(58%, 280px); gap: 11px; }
+.asset-loading__skeleton i { display: block; height: 9px; border-radius: 999px; background: #e5e7eb; }
+.asset-loading__skeleton i:last-child { width: 62%; }
+.asset-preview-error { display: grid; min-height: inherit; align-content: center; justify-items: center; gap: 8px; padding: 32px 24px; color: #6b5960; text-align: center; }
+.asset-preview-error svg { color: #aa6b63; }
+
+@media (max-width: 720px) {
+  .asset-viewer { margin-top: 22px; }
+  .asset-stage--image { min-height: 230px; }
+  .asset-stage--audio { min-height: 132px; padding: 22px; }
+  .asset-stage--video { min-height: 210px; }
+  .asset-stage--pdf { min-height: 420px; }
+  .asset-stage .asset-pdf { height: calc(100dvh - var(--app-safe-top) - var(--app-safe-bottom) - 210px); min-height: 420px; }
+  .asset-loading { padding: 22px 16px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .asset-media { transition: none; }
+}

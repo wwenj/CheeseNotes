@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { imagePreviewForLine, markdownMarkerRanges } from '../components/MarkdownLiveEditor';
 import { hasUnsavedDraft, splitArticle } from './article';
+import { displayName } from './files';
 
 beforeEach(() => {
   vi.stubGlobal('localStorage', { getItem: () => null });
@@ -20,6 +21,14 @@ describe('article markdown helpers', () => {
     expect(hasUnsavedDraft('# 标题\n\n正文', '# 标题\n\n正文')).toBe(false);
     expect(hasUnsavedDraft('# 标题\n\n**正文**', '# 标题\n\n正文')).toBe(true);
     expect(hasUnsavedDraft('# 新笔记\n', undefined)).toBe(true);
+  });
+});
+
+describe('file display names', () => {
+  it('removes regular extensions without truncating dotfiles', () => {
+    expect(displayName('资料/会议记录.md')).toBe('会议记录');
+    expect(displayName('附件/录音.m4a')).toBe('录音');
+    expect(displayName('.gitignore')).toBe('.gitignore');
   });
 });
 

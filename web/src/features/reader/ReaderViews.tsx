@@ -1,11 +1,11 @@
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { BookOpen, Check, Copy, FilePlus2, FolderOpen, Heart, LoaderCircle, MoreHorizontal, PencilLine, Trash2 } from 'lucide-react';
+import { BookOpen, Check, Copy, FilePlus2, FolderOpen, Heart, LoaderCircle, MoreHorizontal, PencilLine, Trash2, TriangleAlert } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { Note, NoteSummary } from '../../api';
 import { displayName, isMarkdown, isText } from '../../lib/files';
 import { splitArticle } from '../../lib/article';
 import AssetViewer from '../../components/AssetViewer';
-import MarkdownLiveEditor from '../../components/MarkdownLiveEditor';
 import MarkdownRenderer from '../../components/MarkdownRenderer';
 import type { ArticleMode, Draft } from '../../app/types';
 
@@ -19,9 +19,9 @@ type DocumentViewProps = {
   onNew: () => void;
 };
 
-export function DocumentView({ selected, note, files, loading, readerFontSize, onOpen, onNew }: DocumentViewProps) {
+export const DocumentView = memo(function DocumentView({ selected, note, files, loading, readerFontSize, onOpen, onNew }: DocumentViewProps) {
   if (!selected && !loading) return <div className="document-empty"><div><FolderOpen size={27} /><h1>打开一个文件</h1><p>从文件列表选择笔记、PDF 或其他附件。</p><button type="button" className="accent-button" onClick={onNew}><FilePlus2 size={16} />新建笔记</button></div></div>;
-  if (loading) return <div className="document-loading"><LoaderCircle className="spin" size={20} />正在打开文件</div>;
+  if (loading && !note) return <div className="document-loading" role="status" aria-label="正在加载"><LoaderCircle className="spin" size={20} /></div>;
   if (!selected) return null;
   if (isMarkdown(selected.path) && note) {
     const article = splitArticle(note.content, selected.path);
@@ -30,41 +30,56 @@ export function DocumentView({ selected, note, files, loading, readerFontSize, o
       {article.body.trim() ? <MarkdownRenderer content={article.body} sourcePath={selected.path} files={files} onOpen={onOpen} /> : null}
     </article>;
   }
-  return <article className="document-view"><h1 className="fallback-title">{displayName(selected.path)}</h1>{isText(selected.path) && note ? <pre className="plain-text-view">{note.content}</pre> : <AssetViewer path={selected.path} />}</article>;
-}
+  return <article className="document-view"><h1 className="fallback-title">{displayName(selected.path)}</h1>{isText(selected.path) && note ? <pre className="plain-text-view">{note.content}</pre> : <AssetViewer path={selected.path} version={selected.assetVersion} />}</article>;
+});
 
-export function ArticleEditor({ draft, readerFontSize, sourcePath, files, onChange, onSave }: { draft: Draft; readerFontSize: number; sourcePath: string; files: NoteSummary[]; onChange: (content: string) => void; onSave: () => void }) {
-  const article = splitArticle(draft.content, sourcePath);
-  const hasTitle = /^\uFEFF?\s*#\s+/.test(draft.content);
-  const updateContent = (title: string, body: string, forceTitle = hasTitle) => {
-    const nextTitle = title.replace(/\s+/g, ' ').trim() || displayName(sourcePath);
-    onChange(forceTitle || nextTitle !== displayName(sourcePath) ? `# ${nextTitle}${body ? `\n\n${body}` : '\n'}` : body);
-  };
+export function ArticleToolbar({ articleMode, refreshState, onToggle, onOpenMenu, onRetry }: { articleMode: ArticleMode; refreshState: 'updating' | 'failed' | null; onToggle: () => void; onOpenMenu: () => void; onRetry: () => void }) {
+  const [failureOpen, setFailureOpen] = useState(false);
+  const updating = refreshState === 'updating';
 
-  return <article className="document-view reader-document article-editor-view" style={{ '--reader-font-size': `${readerFontSize}px` } as CSSProperties}>
-    <h1 className="fallback-title article-title article-title-editor" contentEditable suppressContentEditableWarning role="textbox" inputMode="text" aria-label="文章标题" aria-multiline="false" onInput={(event) => updateContent(event.currentTarget.textContent ?? '', article.body, true)} onKeyDown={(event) => { if (event.key === 'Enter') event.preventDefault(); }}>{article.title}</h1>
-    <MarkdownLiveEditor content={article.body} sourcePath={sourcePath} files={files} onChange={(body) => updateContent(article.title, body)} onSave={onSave} />
-    <small className="article-editor-hint">点击任意段落编辑；当前行显示 Markdown 语法；⌘S 保存</small>
-  </article>;
-}
+  useEffect(() => {
+    if (refreshState !== 'failed') setFailureOpen(false);
+  }, [refreshState]);
 
-export function ArticleToolbar({ articleMode, onToggle, onOpenMenu }: { articleMode: ArticleMode; onToggle: () => void; onOpenMenu: () => void }) {
   return <div className="article-toolbar">
-    <button type="button" className="floating-button mode-toggle" onClick={onToggle} aria-label={articleMode === 'read' ? '切换到写作模式' : '切换到阅读模式'}>{articleMode === 'read' ? <PencilLine size={24} /> : <BookOpen size={24} />}</button>
+    <button type="button" className="floating-button mode-toggle" onClick={onToggle} disabled={updating} title={updating ? '文档正在更新' : undefined} aria-label={updating ? '文档正在更新，暂不能切换写作模式' : articleMode === 'read' ? '切换到写作模式' : '切换到阅读模式'}>{articleMode === 'read' ? <PencilLine size={24} /> : <BookOpen size={24} />}</button>
+    {updating && <span className="article-refresh-status" role="status" aria-live="polite" aria-label="正在更新文档"><LoaderCircle className="spin" size={18} /></span>}
+    {refreshState === 'failed' && <div className="article-refresh-failure">
+      <button type="button" className="floating-button article-refresh-failure-button" onClick={() => setFailureOpen((open) => !open)} aria-label="文档更新失败，点击查看提示" aria-expanded={failureOpen}><TriangleAlert size={19} /></button>
+      {failureOpen && <section className="article-refresh-popover" role="dialog" aria-label="文档更新失败">
+        <p>文档更新失败，请重试。</p>
+        <button type="button" className="quiet-action" onClick={() => { setFailureOpen(false); onRetry(); }}>重新尝试</button>
+      </section>}
+    </div>}
     <button type="button" className="floating-button article-menu" onClick={onOpenMenu} aria-label="打开文章操作"><MoreHorizontal size={25} /></button>
   </div>;
 }
 
 export function ArticleActionSheet({ mode, onClose, onModeChange, onCopy, onFavorite, onDelete }: { mode: ArticleMode; onClose: () => void; onModeChange: (mode: ArticleMode) => void; onCopy: () => void; onFavorite: () => void; onDelete: () => void }) {
+  const [isClosing, setIsClosing] = useState(false);
+  const afterClose = useRef<(() => void) | null>(null);
   const modes: Array<{ mode: ArticleMode; label: string; icon: LucideIcon }> = [
     { mode: 'read', label: '阅读视图', icon: BookOpen },
     { mode: 'write', label: '写作视图', icon: PencilLine },
   ];
-  return <><button type="button" className="sheet-backdrop" aria-label="关闭文章操作" onClick={onClose} /><section className="article-action-sheet" role="dialog" aria-modal="true" aria-label="文章操作">
+
+  const requestClose = useCallback((nextAction: () => void = onClose) => {
+    if (isClosing) return;
+    afterClose.current = nextAction;
+    setIsClosing(true);
+  }, [isClosing, onClose]);
+
+  const completeClose = useCallback(() => {
+    const nextAction = afterClose.current;
+    afterClose.current = null;
+    nextAction?.();
+  }, []);
+
+  return <><button type="button" className={isClosing ? 'sheet-backdrop is-closing' : 'sheet-backdrop'} aria-label="关闭文章操作" onClick={() => requestClose()} /><section className={isClosing ? 'article-action-sheet is-closing' : 'article-action-sheet'} role="dialog" aria-modal="true" aria-label="文章操作" onAnimationEnd={(event) => { if (isClosing && event.animationName === 'article-sheet-exit') completeClose(); }}>
     <div className="sheet-handle" />
-    <div className="sheet-group sheet-mode-group">{modes.map(({ mode: itemMode, label, icon: Icon }) => <button type="button" key={itemMode} className={mode === itemMode ? 'sheet-row is-active' : 'sheet-row'} onClick={() => onModeChange(itemMode)}><Icon size={18} /><span>{label}</span>{mode === itemMode && <Check size={16} />}</button>)}</div>
-    <div className="sheet-group"><button type="button" className="sheet-row" onClick={onCopy}><Copy size={18} /><span>复制文章</span></button><button type="button" className="sheet-row" onClick={onFavorite}><Heart size={18} /><span>收藏</span><small>即将支持</small></button></div>
-    <div className="sheet-group"><button type="button" className="sheet-row sheet-danger" onClick={onDelete}><Trash2 size={18} /><span>删除文章</span></button></div>
+    <div className="sheet-group sheet-mode-group">{modes.map(({ mode: itemMode, label, icon: Icon }) => <button type="button" key={itemMode} className={mode === itemMode ? 'sheet-row is-active' : 'sheet-row'} onClick={() => requestClose(() => onModeChange(itemMode))}><Icon size={18} /><span>{label}</span>{mode === itemMode && <Check size={16} />}</button>)}</div>
+    <div className="sheet-group"><button type="button" className="sheet-row" onClick={() => requestClose(onCopy)}><Copy size={18} /><span>复制文章</span></button><button type="button" className="sheet-row" onClick={() => requestClose(onFavorite)}><Heart size={18} /><span>收藏</span><small>即将支持</small></button></div>
+    <div className="sheet-group"><button type="button" className="sheet-row sheet-danger" onClick={() => requestClose(onDelete)}><Trash2 size={18} /><span>删除文章</span></button></div>
   </section></>;
 }
 

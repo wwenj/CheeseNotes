@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FolderOpen, RefreshCw, Settings2 } from 'lucide-react';
+import { FolderOpen, RefreshCw, SlidersHorizontal } from 'lucide-react';
 import type { NoteSummary, SyncStatus } from '../../api';
 import { formatLastSync, isSyncBusy, stateText } from '../../app/constants';
 import type { Panel } from '../../app/types';
@@ -14,12 +14,13 @@ export type ExplorerProps = {
   panel: Panel;
   onSearch: (value: string) => void;
   onToggle: (path: string) => void;
+  onCollapseAll: () => void;
   onSelect: (file: NoteSummary) => void;
   onPanel: (panel: Panel) => void;
   onSync: () => Promise<void>;
 };
 
-export default function Explorer({ files, selectedPath, expanded, search, sync, panel, onSearch, onToggle, onSelect, onPanel, onSync }: ExplorerProps) {
+export default function Explorer({ files, selectedPath, expanded, search, sync, panel, onSearch, onToggle, onCollapseAll, onSelect, onPanel, onSync }: ExplorerProps) {
   const [syncRequested, setSyncRequested] = useState(false);
   const syncing = syncRequested || isSyncBusy(sync);
   const lastSyncAge = sync?.lastSuccessAt ? Date.now() - new Date(sync.lastSuccessAt).getTime() : 0;
@@ -39,12 +40,12 @@ export default function Explorer({ files, selectedPath, expanded, search, sync, 
         <span><b>{stateText[sync?.state ?? 'unconfigured']}</b><small>{formatLastSync(sync?.lastSuccessAt ?? '')}</small></span>
       </button>
     </header>
-    <FileTree files={files} selectedPath={selectedPath} expanded={expanded} search={search} onSearch={onSearch} onToggle={onToggle} onSelect={onSelect} />
+    <FileTree files={files} selectedPath={selectedPath} expanded={expanded} search={search} onSearch={onSearch} onToggle={onToggle} onCollapseAll={onCollapseAll} onSelect={onSelect} />
     <footer className="explorer-footer">
-      <button type="button" className={panel === 'settings' ? 'side-action is-active' : 'side-action'} onClick={() => onPanel('settings')}>
-        <Settings2 size={17} /><span>设置</span>
-      </button>
       <span className="sidebar-count"><FolderOpen size={15} />共 {files.length} 个文件</span>
+      <button type="button" className={panel === 'settings' ? 'side-action settings-action is-active' : 'side-action settings-action'} onClick={() => onPanel('settings')} aria-label="打开设置" title="设置">
+        <SlidersHorizontal size={19} strokeWidth={2.2} /><span>设置</span>
+      </button>
     </footer>
   </div>;
 }

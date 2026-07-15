@@ -11,6 +11,8 @@ import { FileStoreService } from '../storage/file-store.service.js';
 import { PathPolicy } from '../storage/path-policy.service.js';
 import { SyncService } from '../sync/sync.service.js';
 
+type TreeEntry = { path: string; revision: string; assetVersion: string; updated_at: string };
+
 @Injectable()
 export class NoteService {
   private readonly md = new MarkdownIt({ html: false, linkify: true });
@@ -31,8 +33,8 @@ export class NoteService {
     return { path: safe, content, revision: hash(content) };
   }
 
-  tree() {
-    return this.database.db.prepare('SELECT path,revision,updated_at FROM notes ORDER BY path').all();
+  tree(): TreeEntry[] {
+    return this.database.db.prepare('SELECT path,revision,COALESCE(remote_sha,revision) AS assetVersion,updated_at FROM notes ORDER BY path').all() as TreeEntry[];
   }
 
   async asset(path: string) {
@@ -42,7 +44,12 @@ export class NoteService {
     await fs.access(file).catch(() => {
       throw new NotFoundException('文件不存在');
     });
-    return { file, mime: mimeTypes[extname(safe).toLowerCase()] ?? 'application/octet-stream' };
+    const row = this.database.db.prepare('SELECT revision,remote_sha FROM notes WHERE path=?').get(safe) as { revision?: string; remote_sha?: string | null } | undefined;
+    return {
+      file,
+      mime: mimeTypes[extname(safe).toLowerCase()] ?? 'application/octet-stream',
+      version: row?.remote_sha ?? row?.revision ?? hash(safe),
+    };
   }
 
   async save(path: string, content: string, revision?: string) {

@@ -1,4 +1,4 @@
-import { Controller, Delete, Get, Inject, Post, Query, Res } from '@nestjs/common';
+import { Controller, Delete, Get, Inject, Logger, Post, Query, Res } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 import { runtimeConfig } from '../../config/runtime.config.js';
 import { RepositoryService } from '../settings/repository.service.js';
@@ -7,6 +7,8 @@ import { OAuthService } from './oauth.service.js';
 
 @Controller('auth/github')
 export class AuthController {
+  private readonly logger = new Logger(AuthController.name);
+
   constructor(
     @Inject(OAuthService) private readonly oauth: OAuthService,
     @Inject(RepositoryService) private readonly repository: RepositoryService,
@@ -28,6 +30,7 @@ export class AuthController {
       return reply.code(302).redirect(`${base}/?github=connected`);
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : 'GitHub 授权失败';
+      this.logger.warn(`GitHub OAuth callback failed: ${message}`);
       return reply.code(302).redirect(`${base}/?github=error&reason=${encodeURIComponent(message)}`);
     }
   }

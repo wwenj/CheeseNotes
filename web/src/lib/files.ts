@@ -3,13 +3,14 @@ import type { NoteSummary } from '../api';
 export type TreeNode = { name: string; path: string; folder: boolean; file?: NoteSummary; children: TreeNode[] };
 
 const textExtensions = new Set(['md', 'txt', 'json', 'jsonl', 'yaml', 'yml']);
-const imageExtensions = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'avif']);
-const audioExtensions = new Set(['mp3', 'm4a', 'wav', 'ogg']);
-const videoExtensions = new Set(['mp4', 'webm', 'mov']);
+const imageExtensions = new Set(['png', 'apng', 'jpg', 'jpeg', 'jfif', 'webp', 'gif', 'svg', 'avif', 'bmp', 'ico', 'heic', 'heif']);
+const audioExtensions = new Set(['mp3', 'm4a', 'aac', 'wav', 'ogg', 'oga', 'opus', 'flac']);
+const videoExtensions = new Set(['mp4', 'm4v', 'webm', 'mov', 'ogv', '3gp', '3g2']);
 
 export function extension(path: string) { return path.split('.').at(-1)?.toLowerCase() ?? ''; }
 export function isMarkdown(path: string) { return extension(path) === 'md'; }
 export function isText(path: string) { return textExtensions.has(extension(path)); }
+export function fileName(path: string) { return path.split('/').at(-1) || path; }
 export function fileKind(path: string) {
   const ext = extension(path);
   if (isMarkdown(path)) return 'markdown';
@@ -21,7 +22,11 @@ export function fileKind(path: string) {
   return 'file';
 }
 
-export function displayName(path: string) { return path.split('/').at(-1)?.replace(/\.md$/i, '') || path; }
+export function displayName(path: string) {
+  const name = fileName(path);
+  const extensionStart = name.lastIndexOf('.');
+  return extensionStart > 0 ? name.slice(0, extensionStart) : name;
+}
 
 export function buildTree(files: NoteSummary[]): TreeNode[] {
   const root: TreeNode = { name: '', path: '', folder: true, children: [] };
