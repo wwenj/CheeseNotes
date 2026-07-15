@@ -4,6 +4,7 @@
   "packageManager": "pnpm@10.15.0",
   "scripts": {
     "start": "NODE_ENV=production node dist/src/main.js",
+    "start:deploy": "bash ./start.sh",
     "start:dev": "NODE_ENV=development node ./node_modules/tsx/dist/cli.mjs watch src/main.ts",
     "build": "node ./node_modules/typescript/bin/tsc -p tsconfig.json",
     "test": "node ./node_modules/vitest/vitest.mjs run"
