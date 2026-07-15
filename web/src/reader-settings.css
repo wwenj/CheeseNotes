@@ -65,7 +65,9 @@
 .article-refresh-popover { position: absolute; z-index: 3; top: calc(100% + 8px); right: 0; display: grid; width: min(248px, calc(100vw - 32px)); gap: 10px; padding: 12px; border: 1px solid #ead9ad; border-radius: 8px; color: #685228; background: #fffdf7; font-size: 12px; line-height: 1.5; }
 .article-refresh-popover p { margin: 0; }
 .article-refresh-popover .quiet-action { width: fit-content; min-height: 30px; color: #685228; border-color: #ddc98e; background: #fff; }
+.article-header { margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #ececea; }
 .article-title { max-width: 22ch; margin-bottom: 1.05em; font-size: clamp(32px, 4vw, 40px); letter-spacing: -.04em; text-wrap: balance; }
+.article-header > .article-title { margin-bottom: 0; }
 .article-editor-view { min-height: 100vh; }
 .article-editor-hint { display: block; margin-top: 18px; color: #96989c; font-size: 11px; }
 .markdown-live-editor .cm-image-preview { display: block; width: fit-content; max-width: 100%; margin: .75em 0 1.15em; }

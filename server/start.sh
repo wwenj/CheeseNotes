@@ -1,13 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$(dirname "$0")"
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
-install_marker="node_modules/.modules.yaml"
-if [[ ! -f "$install_marker" || package.json -nt "$install_marker" || pnpm-lock.yaml -nt "$install_marker" ]] \
-  || ! node -e "require.resolve('reflect-metadata')" >/dev/null 2>&1; then
-  pnpm install
-fi
+"$ROOT_DIR/build.sh"
 
-pnpm build
+cd "$ROOT_DIR/server"
 exec npm run start

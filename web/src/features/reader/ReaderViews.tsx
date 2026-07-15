@@ -26,7 +26,7 @@ export const DocumentView = memo(function DocumentView({ selected, note, files, 
   if (isMarkdown(selected.path) && note) {
     const article = splitArticle(note.content, selected.path);
     return <article className="document-view reader-document" style={{ '--reader-font-size': `${readerFontSize}px` } as CSSProperties}>
-      <h1 className="fallback-title article-title">{article.title}</h1>
+      <header className="article-header"><h1 className="fallback-title article-title">{article.title}</h1></header>
       {article.body.trim() ? <MarkdownRenderer content={article.body} sourcePath={selected.path} files={files} onOpen={onOpen} /> : null}
     </article>;
   }
