@@ -1,40 +1,20 @@
-import type { Note, NoteSummary } from '../api';
+import type { Note } from '../api';
 
 const databaseName = 'noteai-reading-cache';
-const databaseVersion = 2;
+const databaseVersion = 3;
 const documentStore = 'documents';
-const workspaceStore = 'workspaces';
 const assetStore = 'assets';
-const draftStore = 'drafts';
 const assetCacheName = 'noteai-assets-v1';
 const maxMemoryDocuments = 24;
 const maxMemoryBytes = 8 * 1024 * 1024;
 const maxPersistentDocumentBytes = 100 * 1024 * 1024;
 const maxAssetBytes = 300 * 1024 * 1024;
 
-export type CachedWorkspace = {
-  key: string;
-  files: NoteSummary[];
-  folders: string[];
-  etag: string | null;
-  lastPath: string | null;
-  updatedAt: number;
-};
-
 type CachedDocument = Note & {
   id: string;
   workspaceKey: string;
   bytes: number;
   accessedAt: number;
-};
-
-export type CachedDraft = {
-  id: string;
-  workspaceKey: string;
-  path: string;
-  content: string;
-  revision: string;
-  updatedAt: number;
 };
 
 type CachedAsset = {
@@ -56,16 +36,13 @@ function openDatabase() {
     const request = indexedDB.open(databaseName, databaseVersion);
     request.onupgradeneeded = () => {
       const database = request.result;
-      if (!database.objectStoreNames.contains(workspaceStore)) database.createObjectStore(workspaceStore, { keyPath: 'key' });
+      if (database.objectStoreNames.contains('workspaces')) database.deleteObjectStore('workspaces');
+      if (database.objectStoreNames.contains('drafts')) database.deleteObjectStore('drafts');
       if (!database.objectStoreNames.contains(documentStore)) {
         const store = database.createObjectStore(documentStore, { keyPath: 'id' });
         store.createIndex('workspaceKey', 'workspaceKey', { unique: false });
       }
       if (!database.objectStoreNames.contains(assetStore)) database.createObjectStore(assetStore, { keyPath: 'url' });
-      if (!database.objectStoreNames.contains(draftStore)) {
-        const store = database.createObjectStore(draftStore, { keyPath: 'id' });
-        store.createIndex('workspaceKey', 'workspaceKey', { unique: false });
-      }
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => resolve(null);
@@ -123,24 +100,6 @@ async function pruneAssets(cache: Cache) {
   }
 }
 
-export async function readCachedWorkspace(key: string) {
-  const cached = await transaction<CachedWorkspace>(workspaceStore, 'readonly', (store) => store.get(key));
-  return cached ? { ...cached, folders: cached.folders ?? [] } : cached;
-}
-
-export async function writeCachedWorkspace(key: string, files: NoteSummary[], folders: string[], etag: string | null) {
-  const current = await readCachedWorkspace(key);
-  const record: CachedWorkspace = { key, files, folders, etag, lastPath: current?.lastPath ?? null, updatedAt: Date.now() };
-  await transaction(workspaceStore, 'readwrite', (store) => store.put(record));
-  return record;
-}
-
-export async function setCachedLastPath(key: string, path: string) {
-  const current = await readCachedWorkspace(key);
-  if (!current) return;
-  await transaction(workspaceStore, 'readwrite', (store) => store.put({ ...current, lastPath: path, updatedAt: Date.now() } satisfies CachedWorkspace));
-}
-
 export async function readCachedDocument(workspaceKey: string, path: string) {
   const id = documentId(workspaceKey, path);
   const memory = memoryDocuments.get(id);
@@ -176,74 +135,12 @@ export async function removeCachedDocument(workspaceKey: string, path: string) {
   await transaction(documentStore, 'readwrite', (store) => store.delete(id));
 }
 
-const draftId = (workspaceKey: string, path: string) => `draft\u0000${documentId(workspaceKey, path)}`;
-
-async function updateDraftRecord(record: CachedDraft) {
-  const database = await openDatabase();
-  if (!database) return;
-  await new Promise<void>((resolve) => {
-    const tx = database.transaction(draftStore, 'readwrite');
-    const store = tx.objectStore(draftStore);
-    const current = store.get(record.id);
-    current.onsuccess = () => {
-      const existing = current.result as CachedDraft | undefined;
-      if (!existing || existing.updatedAt <= record.updatedAt) store.put(record);
-    };
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => resolve();
-    tx.onabort = () => resolve();
-  });
-}
-
-export async function writeCachedDraft(workspaceKey: string, draft: Omit<CachedDraft, 'id' | 'workspaceKey'>) {
-  await updateDraftRecord({ ...draft, id: draftId(workspaceKey, draft.path), workspaceKey });
-}
-
-export async function readCachedDraft(workspaceKey: string, path: string) {
-  return transaction<CachedDraft>(draftStore, 'readonly', (store) => store.get(draftId(workspaceKey, path)));
-}
-
-export async function readCachedDrafts(workspaceKey: string) {
-  const database = await openDatabase();
-  if (!database) return [] as CachedDraft[];
-  return new Promise<CachedDraft[]>((resolve) => {
-    const tx = database.transaction(draftStore, 'readonly');
-    const request = tx.objectStore(draftStore).index('workspaceKey').getAll(IDBKeyRange.only(workspaceKey));
-    request.onsuccess = () => resolve(request.result as CachedDraft[]);
-    request.onerror = () => resolve([]);
-    tx.onabort = () => resolve([]);
-  });
-}
-
-export async function removeCachedDraft(workspaceKey: string, path: string, throughUpdatedAt = Number.POSITIVE_INFINITY) {
-  const database = await openDatabase();
-  if (!database) return;
-  await new Promise<void>((resolve) => {
-    const tx = database.transaction(draftStore, 'readwrite');
-    const store = tx.objectStore(draftStore);
-    const current = store.get(draftId(workspaceKey, path));
-    current.onsuccess = () => {
-      const existing = current.result as CachedDraft | undefined;
-      if (existing && existing.updatedAt <= throughUpdatedAt) store.delete(existing.id);
-    };
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => resolve();
-    tx.onabort = () => resolve();
-  });
-}
-
-export async function clearCachedDrafts(workspaceKey: string) {
-  const drafts = await readCachedDrafts(workspaceKey);
-  await Promise.all(drafts.map((draft) => removeCachedDraft(workspaceKey, draft.path)));
-}
-
 export async function clearCachedWorkspace(key: string) {
   const documents = await transaction<CachedDocument[]>(documentStore, 'readonly', (store) => store.index('workspaceKey').getAll(IDBKeyRange.only(key))) ?? [];
   for (const document of documents) {
     memoryDocuments.delete(document.id);
     await transaction(documentStore, 'readwrite', (store) => store.delete(document.id));
   }
-  await transaction(workspaceStore, 'readwrite', (store) => store.delete(key));
 }
 
 export async function cachedAssetSource(source: string) {

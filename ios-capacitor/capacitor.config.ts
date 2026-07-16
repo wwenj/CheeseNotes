@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.wwenj.noteai.capacitor',
-  appName: 'NoteAI',
+  appName: '芝士',
   webDir: 'www',
   server: {
     iosScheme: 'capacitor',

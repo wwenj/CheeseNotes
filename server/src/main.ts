@@ -26,7 +26,13 @@ async function bootstrap() {
   app.setGlobalPrefix('api');
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true }));
   const config = runtimeConfig();
-  if (config.corsOrigins.length) app.enableCors({ origin: config.corsOrigins, credentials: false });
+  if (config.corsOrigins.length) {
+    app.enableCors({
+      origin: config.corsOrigins,
+      credentials: false,
+      methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    });
+  }
   const publicDir = resolve(process.cwd(), 'public');
   if (existsSync(publicDir)) {
     const fastify = app.getHttpAdapter().getInstance();

@@ -17,7 +17,7 @@ type AutoSaveQueueOptions = {
   persist: (draft: AutoSaveDraft) => Promise<void>;
   clear: (draft: AutoSaveDraft) => Promise<void>;
   save: (draft: AutoSaveDraft) => Promise<AutoSaveResult>;
-  onSaved: (draft: AutoSaveDraft, result: Extract<AutoSaveResult, { kind: 'saved' }>) => void | Promise<void>;
+  onSaved: (draft: AutoSaveDraft, result: Extract<AutoSaveResult, { kind: 'saved' }>, fullySaved: boolean) => void | Promise<void>;
   onRetrying: (draft: AutoSaveDraft) => void;
   onBlocked: (draft: AutoSaveDraft) => void;
 };
@@ -258,9 +258,10 @@ export class AutoSaveQueue {
         this.tasks.delete(previousKey);
         this.tasks.set(nextKey, task);
       }
-      await this.options.onSaved(snapshot, result);
+      const fullySaved = task.latest.content === snapshot.content;
+      await this.options.onSaved(snapshot, result, fullySaved);
 
-      if (task.latest.content === snapshot.content) {
+      if (fullySaved) {
         await this.persistLatest(task);
         await this.clearSavedDraft(task, task.latest.updatedAt);
         return true;
@@ -277,7 +278,7 @@ export class AutoSaveQueue {
       return true;
     } catch {
       task.retryIndex += 1;
-      if (task.retryIndex >= 2 && !task.retryNotified) {
+      if (task.retryIndex >= 1 && !task.retryNotified) {
         task.retryNotified = true;
         this.options.onRetrying(snapshot);
       }

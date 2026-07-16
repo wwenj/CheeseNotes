@@ -49,7 +49,7 @@ export default function Explorer({ files, folders, selectedPath, expanded, searc
 
   return <div className="explorer-panel">
     <header className="explorer-header">
-      <div className="brand-lockup"><img className="brand-icon" src="/noteai-icon.png" alt="" /><strong>NoteAI</strong></div>
+      <div className="brand-lockup"><img className="brand-icon" src="/cheese-logo.png" alt="" /><strong>芝士</strong></div>
       <button type="button" className={`sync-status ${syncTone}`} disabled={!conflictBlocked && (syncing || !sync?.manualSyncAvailable)} onClick={requestSync} aria-label={conflictBlocked ? `处理 ${sync?.conflictCount ?? 0} 个同步冲突` : `${stateText[sync?.state ?? 'unconfigured']}，${formatLastSync(sync?.lastSuccessAt ?? '')}`}>
         <RefreshCw className={syncing ? 'spin' : ''} size={16} />
         <span><b>{conflictBlocked ? `同步冲突` : stateText[sync?.state ?? 'unconfigured']}</b><small>{conflictBlocked ? '点击处理' : formatLastSync(sync?.lastSuccessAt ?? '')}</small></span>

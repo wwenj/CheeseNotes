@@ -53,6 +53,25 @@ describe('AutoSaveQueue', () => {
     expect(save.mock.calls[1][0]).toMatchObject({ content: '第二版', revision: 'r1' });
   });
 
+  it('旧请求完成时，新输入仍保持待保存状态', async () => {
+    vi.useFakeTimers();
+    let finishFirst: ((value: { kind: 'saved'; revision: string }) => void) | undefined;
+    const saved = vi.fn();
+    const save = vi.fn()
+      .mockImplementationOnce(() => new Promise<{ kind: 'saved'; revision: string }>((resolve) => { finishFirst = resolve; }))
+      .mockResolvedValueOnce({ kind: 'saved', revision: 'r2' } as const);
+    const queue = new AutoSaveQueue({ persist: vi.fn().mockResolvedValue(undefined), clear: vi.fn().mockResolvedValue(undefined), save, onSaved: saved, onRetrying: vi.fn(), onBlocked: vi.fn() });
+    queue.ensure(baseDraft());
+
+    queue.update({ ...baseDraft(), content: '第一版' });
+    await vi.advanceTimersByTimeAsync(500);
+    queue.update({ ...baseDraft(), content: '第二版' });
+    finishFirst?.({ kind: 'saved', revision: 'r1' });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(saved.mock.calls[0][2]).toBe(false);
+  });
+
   it('立即 flush 可保存空正文，不等待 500ms', async () => {
     vi.useFakeTimers();
     const save = vi.fn().mockResolvedValue({ kind: 'saved', revision: 'r1' } as const);
@@ -90,6 +109,7 @@ describe('AutoSaveQueue', () => {
     expect(clear).not.toHaveBeenCalled();
     expect(persist).toHaveBeenCalledWith(expect.objectContaining({ content: '离线内容' }));
 
+    expect(retrying).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1_000);
     expect(save).toHaveBeenCalledTimes(2);
     expect(retrying).toHaveBeenCalledTimes(1);

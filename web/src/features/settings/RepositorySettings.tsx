@@ -100,7 +100,7 @@ export default function RepositorySettings({ repository, auth, readerFontSize, o
       <nav className="settings-menu-list" aria-label="设置选项">
         <SettingsMenuItem icon={Type} title="阅读与编辑" onClick={() => setPage('reader')} />
         <SettingsMenuItem icon={Github} title="仓库与同步" onClick={() => setPage('repository')} />
-        <SettingsMenuItem icon={Info} title="关于 NoteAI" onClick={() => setPage('about')} />
+        <SettingsMenuItem icon={Info} title="关于芝士" onClick={() => setPage('about')} />
       </nav>
     </div>
   </section>;
@@ -140,9 +140,9 @@ export default function RepositorySettings({ repository, auth, readerFontSize, o
   </section>;
 
   return <section className="settings-view settings-detail-view" onTouchStart={handleDetailTouchStart} onTouchEnd={handleDetailTouchEnd}>
-    <SettingsPageHeader title="关于 NoteAI" onBack={goBack} onClose={onClose} />
+    <SettingsPageHeader title="关于芝士" onBack={goBack} onClose={onClose} />
     <main className="settings-detail-content">
-      <p className="settings-group-label">NoteAI</p>
+      <p className="settings-group-label">芝士</p>
       <section className="settings-detail-group about-settings-group"><div className="settings-detail-heading"><span className="settings-menu-icon"><SlidersHorizontal size={20} strokeWidth={1.8} /></span><div><h2>本地优先的笔记体验</h2><p>使用 GitHub 仓库同步 Markdown 文件，阅读、编辑和同步状态始终清晰可见。</p></div></div><div className="settings-detail-row"><span>版本</span><strong>0.1.0</strong></div></section>
     </main>
   </section>;
