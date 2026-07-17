@@ -5,7 +5,7 @@ import { SettingsModule } from '../settings/settings.module.js';
 import { SyncModule } from '../sync/sync.module.js';
 import { AuthController } from './auth.controller.js';
 import { AccessController } from './access.controller.js';
-import { AuthenticatorService } from './authenticator.service.js';
+import { AUTHENTICATOR_SECRET_VALUE, AuthenticatorService, localAuthenticatorSecret } from './authenticator.service.js';
 import { DeviceGuard } from './device.guard.js';
 import { OAuthService } from './oauth.service.js';
 import { SessionGuard } from './session.guard.js';
@@ -15,6 +15,7 @@ import { SessionGuard } from './session.guard.js';
   controllers: [AuthController, AccessController],
   providers: [
     OAuthService,
+    { provide: AUTHENTICATOR_SECRET_VALUE, useFactory: localAuthenticatorSecret },
     AuthenticatorService,
     DeviceGuard,
     SessionGuard,

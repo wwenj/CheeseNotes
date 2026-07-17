@@ -1,7 +1,8 @@
 import { createHmac } from 'node:crypto';
 import { BadRequestException, HttpException, UnauthorizedException } from '@nestjs/common';
+import { Test } from '@nestjs/testing';
 import { describe, expect, it, vi } from 'vitest';
-import { AuthenticatorService } from '../src/modules/auth/authenticator.service.js';
+import { AUTHENTICATOR_SECRET_VALUE, AuthenticatorService } from '../src/modules/auth/authenticator.service.js';
 import { DeviceGuard } from '../src/modules/auth/device.guard.js';
 
 const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
@@ -26,6 +27,17 @@ function codeAt(now: number) {
 const createService = () => new AuthenticatorService(testAuthenticatorSecret);
 
 describe('AuthenticatorService', () => {
+  it('resolves its Secret through Nest dependency injection', async () => {
+    const module = await Test.createTestingModule({
+      providers: [
+        { provide: AUTHENTICATOR_SECRET_VALUE, useValue: testAuthenticatorSecret },
+        AuthenticatorService,
+      ],
+    }).compile();
+
+    expect(module.get(AuthenticatorService)).toBeInstanceOf(AuthenticatorService);
+  });
+
   it('accepts the current and adjacent TOTP windows', () => {
     const service = createService();
     const now = 1_750_000_000_000;

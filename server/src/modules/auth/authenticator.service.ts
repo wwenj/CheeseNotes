@@ -1,6 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
-import { BadRequestException, HttpException, HttpStatus, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, HttpException, HttpStatus, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { resolve } from 'node:path';
 
 const base32Alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
@@ -9,8 +9,9 @@ const maxFailures = 5;
 const failureWindowMs = 5 * 60_000;
 
 type FailureState = { count: number; startedAt: number };
+export const AUTHENTICATOR_SECRET_VALUE = Symbol('AUTHENTICATOR_SECRET_VALUE');
 
-function localAuthenticatorSecret() {
+export function localAuthenticatorSecret() {
   const path = resolve(process.cwd(), 'config', 'authenticator-secret.local.txt');
   if (!existsSync(path)) throw new Error(`缺少 Authenticator 本机 Secret 文件：${path}`);
   const secret = readFileSync(path, 'utf8').trim();
@@ -45,7 +46,7 @@ export class AuthenticatorService {
   private readonly signingKey: Buffer;
   private readonly failures = new Map<string, FailureState>();
 
-  constructor(secretValue = localAuthenticatorSecret()) {
+  constructor(@Inject(AUTHENTICATOR_SECRET_VALUE) secretValue: string) {
     this.secret = decodeBase32(secretValue);
     this.signingKey = createHmac('sha256', this.secret).update('noteai-device-token-key').digest();
   }
