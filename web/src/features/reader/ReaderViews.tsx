@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { ArrowUpRight, BookOpen, Check, CircleAlert, CircleCheckBig, Clock3, Copy, FilePlus2, FileText, Heart, LoaderCircle, MoreHorizontal, PencilLine, RefreshCw, Trash2, TriangleAlert } from 'lucide-react';
+import { ArrowUpRight, BookOpen, Check, CircleAlert, CircleCheckBig, Copy, FilePlus2, FileText, Heart, LoaderCircle, MoreHorizontal, PencilLine, RefreshCw, Trash2, TriangleAlert } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { Note, NoteSummary, SyncStatus } from '../../api';
 import { formatLastSync, isSyncBusy, stateText } from '../../app/constants';
@@ -29,14 +29,14 @@ function WelcomeView({ files, recentArticles, sync, onOpen, onNew }: Pick<Docume
   const syncLabel = conflict ? `${sync?.conflictCount ?? 0} 个冲突待处理` : stateText[sync?.state ?? 'unconfigured'];
   const syncDetail = conflict ? '请在同步页处理' : formatLastSync(sync?.lastSuccessAt ?? '');
   const SyncIcon = conflict ? CircleAlert : syncing ? RefreshCw : CircleCheckBig;
+  const recentNotes = recentArticles?.slice(0, 5) ?? [];
 
   return <section className="welcome-view" aria-labelledby="welcome-title">
     <div className="welcome-surface">
       <header className="welcome-summary">
         <div className="welcome-intro">
-          <span className="welcome-mark"><BookOpen size={21} /></span>
+          <div className="welcome-brand"><img src="/images/cheese-logo.png" alt="" /><strong>芝士</strong></div>
           <h1 id="welcome-title">现在，写点什么。</h1>
-          <p>从下面继续，或新建一篇笔记。</p>
           <button type="button" className="accent-button" onClick={onNew}><FilePlus2 size={16} />新建笔记</button>
         </div>
         <dl className="welcome-stats">
@@ -46,13 +46,12 @@ function WelcomeView({ files, recentArticles, sync, onOpen, onNew }: Pick<Docume
           </div>
         </dl>
       </header>
-      <section className="welcome-recent" aria-label="最近访问的笔记">
-      {recentArticles?.length
-        ? <div className="welcome-recent-list">{recentArticles.map((file) => <button type="button" key={file.path} className="welcome-note" onClick={() => onOpen(file.path)}>
-          <FileText size={17} /><span><strong>{treeTitle(file)}</strong><small>{file.path}</small></span><ArrowUpRight size={16} />
+      {recentNotes.length > 0 && <section className="welcome-recent" aria-label="最近访问的笔记">
+        <div className="welcome-recent-heading">最近阅读</div>
+        <div className="welcome-recent-list">{recentNotes.map((file) => <button type="button" key={file.path} className="welcome-note" onClick={() => onOpen(file.path)}>
+          <FileText size={17} /><span><strong>{treeTitle(file)}</strong></span><ArrowUpRight size={16} />
         </button>)}</div>
-        : <p className="welcome-recent-empty"><Clock3 size={16} />还没有打开过笔记。新建第一篇开始吧。</p>}
-      </section>
+      </section>}
     </div>
   </section>;
 }

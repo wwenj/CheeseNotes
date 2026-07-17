@@ -163,7 +163,7 @@ export function useWorkspaceController(enabled = true) {
     const workspaceKey = options.workspaceKey ?? (repositoryRef.current ? workspaceKeyFor(repositoryRef.current) : null);
     if (isMarkdown(file.path) && repositoryRef.current) {
       rememberOpenedArticle(repositoryRef.current, file.path);
-      setRecentArticles((current) => [file, ...current.filter((item) => item.path !== file.path)].slice(0, 6));
+      setRecentArticles((current) => [file, ...current.filter((item) => item.path !== file.path)].slice(0, 5));
     }
 
     const cached = workspaceKey ? await readCachedDocument(workspaceKey, file.path) : undefined;

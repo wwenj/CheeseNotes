@@ -5,7 +5,7 @@ import type { ClientSettings } from './types';
 export const clientSettingsKey = 'mynote.client-settings';
 const activeArticleKey = 'mynote.active-article';
 const recentArticlesKey = 'mynote.recent-articles';
-const recentArticleLimit = 6;
+const recentArticleLimit = 5;
 export const defaultClientSettings: ClientSettings = { readerFontSize: 16 };
 
 type StoredArticle = {
