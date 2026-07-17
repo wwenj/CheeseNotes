@@ -1,6 +1,8 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { LoaderCircle } from 'lucide-react';
-import { authApi, authExpiredEvent, type AuthSession, type NoteSummary } from './api';
+import { authApi, authExpiredEvent, githubApi, type AuthSession, type NoteSummary } from './api';
+import { listenForMobileAuthCallback, openAuthorization, type MobileAuthCallback } from './api/mobile-auth';
+import { clearMobileSessionToken, isNativeIOS } from './api/mobile-session';
 import { useWorkspaceController } from './app/useWorkspaceController';
 import { navigate, panelForRoute, pathForPanel, useAppRoute } from './app/routes';
 import type { Panel } from './app/types';
@@ -28,6 +30,7 @@ export default function App() {
       const next = await authApi.session();
       setSession(next);
       if (next.authenticated) setAccessDenied(false);
+      else await clearMobileSessionToken();
     } catch {
       setSession({ authenticated: false, user: null });
       setAuthError('无法读取登录状态，请检查服务连接。');
@@ -50,6 +53,33 @@ export default function App() {
     window.addEventListener(authExpiredEvent, refresh);
     return () => window.removeEventListener(authExpiredEvent, refresh);
   }, [refreshSession]);
+
+  const handleMobileAuthCallback = useCallback(async (callback: MobileAuthCallback) => {
+    if (callback.kind === 'authenticated') {
+      setAccessDenied(false);
+      setAuthError(null);
+      await refreshSession();
+      return;
+    }
+    if (callback.kind === 'forbidden') {
+      setSession({ authenticated: false, user: null });
+      setAccessDenied(true);
+      setAuthError(null);
+      return;
+    }
+    if (callback.kind === 'repository-connected') {
+      await workspace.reload(false);
+      workspace.setNotice('GitHub 已连接，请选择要同步的笔记库。');
+      return;
+    }
+    setAuthError(callback.message);
+  }, [refreshSession, workspace.reload, workspace.setNotice]);
+
+  useEffect(() => {
+    let remove: () => void = () => undefined;
+    void listenForMobileAuthCallback(handleMobileAuthCallback).then((listener) => { remove = listener; });
+    return () => remove();
+  }, [handleMobileAuthCallback]);
 
   const navigateToPanel = useCallback((nextPanel: Panel) => {
     const nextPath = pathForPanel(nextPanel);
@@ -182,22 +212,43 @@ export default function App() {
     ? <Toast key={`error:${workspace.error}`} kind="error" value={workspace.error} onClose={closeError} />
     : workspace.notice ? <Toast key={`notice:${workspace.notice}`} kind="notice" value={workspace.notice} onClose={closeNotice} /> : null;
 
+  const startGitHubLogin = useCallback(async () => {
+    const authorization = await authApi.startGitHubLogin(isNativeIOS() ? 'ios' : 'web');
+    await openAuthorization(authorization.url);
+  }, []);
+
+  const startRepositoryConnection = useCallback(async () => {
+    const authorization = await githubApi.startRepositoryAuthorization(isNativeIOS() ? 'ios' : 'web');
+    await openAuthorization(authorization.url);
+  }, []);
+
   const retryLogin = useCallback(async () => {
     setAccessDenied(false);
     setAuthError(null);
     try {
-      const authorization = await authApi.startGitHubLogin();
-      window.location.href = authorization.url;
+      await startGitHubLogin();
     } catch {
       setAuthError('无法启动 GitHub 登录，请检查服务连接。');
+    }
+  }, [startGitHubLogin]);
+
+  const logout = useCallback(async () => {
+    try {
+      await authApi.logout();
+    } finally {
+      await clearMobileSessionToken();
+      setSession({ authenticated: false, user: null });
+      setAccessDenied(false);
+      setAuthError(null);
+      navigate('/');
     }
   }, []);
 
   if (sessionLoading) return <SetupScreen><LoaderCircle className="spin" size={21} />正在读取登录状态</SetupScreen>;
   if (accessDenied) return <SetupScreen><AccessDenied onRetry={() => void retryLogin()} /></SetupScreen>;
-  if (!session?.authenticated) return <SetupScreen><GitHubLogin error={authError} /></SetupScreen>;
+  if (!session?.authenticated) return <SetupScreen><GitHubLogin error={authError} onLogin={startGitHubLogin} /></SetupScreen>;
   if (workspace.loading && !workspace.auth) return <SetupScreen><LoaderCircle className="spin" size={21} />正在读取本地设置</SetupScreen>;
-  if (!workspace.auth?.connected) return <SetupScreen feedback={feedback}><ConnectGitHub error={workspace.error} /></SetupScreen>;
+  if (!workspace.auth?.connected) return <SetupScreen feedback={feedback}><ConnectGitHub error={workspace.error} onConnect={startRepositoryConnection} /></SetupScreen>;
   if (!workspace.repository) return <SetupScreen feedback={feedback}><RepositoryPicker login={workspace.auth.login} onSelect={workspace.chooseRepository} /></SetupScreen>;
   if (workspace.sync?.state === 'checking' && workspace.sync && !workspace.files.length) return <SetupScreen feedback={feedback}><InitializationProgress sync={workspace.sync} onRetry={workspace.runSync} /></SetupScreen>;
 
@@ -234,7 +285,7 @@ export default function App() {
 
   const content = panel === 'vault' ? vaultContent
     : panel === 'sync' ? <SyncPanel sync={workspace.sync} onSync={workspace.runSync} onSyncStatus={workspace.setSync} onRefresh={() => void workspace.reload(false, { preserveCurrentDocument: true, forceTreeRefresh: true })} onError={workspace.setError} onClose={closeSettingsToExplorer} />
-      : <RepositorySettings repository={workspace.repository} auth={workspace.auth} readerFontSize={workspace.clientSettings.readerFontSize} onReaderFontSizeChange={workspace.setReaderFontSize} onClearReadingCache={workspace.clearReadingCache} onDisconnect={workspace.disconnect} onClose={closeSettingsToExplorer} />;
+      : <RepositorySettings repository={workspace.repository} auth={workspace.auth} readerFontSize={workspace.clientSettings.readerFontSize} onReaderFontSizeChange={workspace.setReaderFontSize} onClearReadingCache={workspace.clearReadingCache} onDisconnect={workspace.disconnect} onLogout={logout} onClose={closeSettingsToExplorer} />;
 
   return <WorkspaceShell
     explorer={explorer}

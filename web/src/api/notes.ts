@@ -1,4 +1,5 @@
 import { ApiError, apiUrl, notifyAuthExpired, request } from './http';
+import { mobileSessionToken } from './mobile-session';
 
 export type NoteSummary = { id?: string; path: string; title?: string; revision?: string; assetVersion?: string; updated_at?: string };
 export type Note = { id?: string; path: string; content: string; revision: string };
@@ -9,6 +10,8 @@ export type NoteTreeResult = { files: NoteSummary[] | null; folders: string[] | 
 async function tree(etag?: string, signal?: AbortSignal, force = false): Promise<NoteTreeResult> {
   const headers = new Headers();
   if (etag) headers.set('If-None-Match', etag);
+  const token = await mobileSessionToken();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
   let response: Response;
   try {
     response = await fetch(apiUrl('tree?includeFolders=1'), { headers, signal, credentials: 'include', ...(force ? { cache: 'no-store' } : {}) });

@@ -1,3 +1,5 @@
+import { mobileSessionToken } from './mobile-session';
+
 export class ApiError extends Error {
   constructor(message: string, readonly status?: number) { super(message); }
 }
@@ -20,6 +22,8 @@ export function apiUrl(path: string) {
 export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers);
   if (options.body) headers.set('Content-Type', 'application/json');
+  const token = await mobileSessionToken();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
   let response: Response;
   try {
     response = await fetch(apiUrl(path), { ...options, headers, credentials: 'include' });

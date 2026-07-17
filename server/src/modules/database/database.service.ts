@@ -39,10 +39,11 @@ export class DatabaseService {
       );
       CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS sessions_user_id_idx ON sessions(user_id);
+      CREATE TABLE IF NOT EXISTS mobile_auth_handoffs(token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS oauth_web_states(
         state TEXT PRIMARY KEY, client_id TEXT NOT NULL, client_secret TEXT NOT NULL,
         verifier TEXT NOT NULL, purpose TEXT NOT NULL DEFAULT 'repository',
-        user_id TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
+        user_id TEXT NOT NULL DEFAULT '', client TEXT NOT NULL DEFAULT 'web', created_at TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS sync_jobs(id INTEGER PRIMARY KEY AUTOINCREMENT, state TEXT NOT NULL, phase TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
@@ -80,6 +81,7 @@ export class DatabaseService {
     const missingOAuthStateColumns: Array<[string, string]> = [
       ['purpose', "TEXT NOT NULL DEFAULT 'repository'"],
       ['user_id', "TEXT NOT NULL DEFAULT ''"],
+      ['client', "TEXT NOT NULL DEFAULT 'web'"],
     ];
     for (const [name, type] of missingOAuthStateColumns) {
       if (!oauthStateColumns.some((column) => column.name === name)) this.db.exec(`ALTER TABLE oauth_web_states ADD COLUMN ${name} ${type}`);

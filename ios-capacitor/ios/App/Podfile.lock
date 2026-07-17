@@ -1,22 +1,47 @@
 PODS:
+  - AparajitaCapacitorSecureStorage (8.0.0):
+    - Capacitor
+    - KeychainSwift (~> 21.0)
   - Capacitor (8.4.1):
     - CapacitorCordova
+  - CapacitorApp (8.1.1):
+    - Capacitor
+  - CapacitorBrowser (8.0.4):
+    - Capacitor
   - CapacitorCordova (8.4.1)
+  - KeychainSwift (21.0.0)
 
 DEPENDENCIES:
+  - "AparajitaCapacitorSecureStorage (from `../../node_modules/.pnpm/@aparajita+capacitor-secure-storage@8.0.0/node_modules/@aparajita/capacitor-secure-storage`)"
   - "Capacitor (from `../../node_modules/.pnpm/@capacitor+ios@8.4.1_@capacitor+core@8.4.1/node_modules/@capacitor/ios`)"
+  - "CapacitorApp (from `../../node_modules/.pnpm/@capacitor+app@8.1.1_@capacitor+core@8.4.1/node_modules/@capacitor/app`)"
+  - "CapacitorBrowser (from `../../node_modules/.pnpm/@capacitor+browser@8.0.4_@capacitor+core@8.4.1/node_modules/@capacitor/browser`)"
   - "CapacitorCordova (from `../../node_modules/.pnpm/@capacitor+ios@8.4.1_@capacitor+core@8.4.1/node_modules/@capacitor/ios`)"
 
+SPEC REPOS:
+  trunk:
+    - KeychainSwift
+
 EXTERNAL SOURCES:
+  AparajitaCapacitorSecureStorage:
+    :path: "../../node_modules/.pnpm/@aparajita+capacitor-secure-storage@8.0.0/node_modules/@aparajita/capacitor-secure-storage"
   Capacitor:
     :path: "../../node_modules/.pnpm/@capacitor+ios@8.4.1_@capacitor+core@8.4.1/node_modules/@capacitor/ios"
+  CapacitorApp:
+    :path: "../../node_modules/.pnpm/@capacitor+app@8.1.1_@capacitor+core@8.4.1/node_modules/@capacitor/app"
+  CapacitorBrowser:
+    :path: "../../node_modules/.pnpm/@capacitor+browser@8.0.4_@capacitor+core@8.4.1/node_modules/@capacitor/browser"
   CapacitorCordova:
     :path: "../../node_modules/.pnpm/@capacitor+ios@8.4.1_@capacitor+core@8.4.1/node_modules/@capacitor/ios"
 
 SPEC CHECKSUMS:
+  AparajitaCapacitorSecureStorage: 8128d05cafcb13b00448e20fb388a0edccd44b12
   Capacitor: 35242afe195b1e53c58ca1b827d1b444c5e6602b
+  CapacitorApp: 305bd13c44f6f9d164e2ee66a4faa956ed8c0e06
+  CapacitorBrowser: 752e0208aa07c7aa63d1f7cde895a3e9519b2656
   CapacitorCordova: eebe6bcf807b1b06f3f48237650f96bbcd0eef09
+  KeychainSwift: 4a71a45c802fd9e73906457c2dcbdbdc06c9419d
 
-PODFILE CHECKSUM: c53185904a5c788508f7a20d3ba80d076cc5aafc
+PODFILE CHECKSUM: 58f8b676406271de2b913cf4911e03fa1981997d
 
 COCOAPODS: 1.17.0

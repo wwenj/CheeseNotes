@@ -1,4 +1,5 @@
 import type { Note } from '../api';
+import { isNativeIOS, mobileSessionToken } from '../api/mobile-session';
 
 const databaseName = 'noteai-reading-cache';
 const databaseVersion = 3;
@@ -144,17 +145,24 @@ export async function clearCachedWorkspace(key: string) {
 }
 
 export async function cachedAssetSource(source: string) {
-  if (!('caches' in globalThis) || typeof URL.createObjectURL !== 'function') return { source, release: () => {} };
-  const cache = await caches.open(assetCacheName);
-  let response = await cache.match(source);
+  const canCache = 'caches' in globalThis;
+  if (typeof URL.createObjectURL !== 'function') {
+    if (isNativeIOS()) throw new Error('当前设备不支持受保护媒体预览');
+    return { source, release: () => {} };
+  }
+  const cache = canCache ? await caches.open(assetCacheName) : null;
+  let response = cache ? await cache.match(source) : undefined;
   if (!response) {
-    response = await fetch(source);
+    const headers = new Headers();
+    const token = await mobileSessionToken();
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+    response = await fetch(source, { headers, credentials: 'include' });
     if (!response.ok) throw new Error(`资源请求失败（${response.status}）`);
-    await cache.put(source, response.clone());
+    await cache?.put(source, response.clone());
   }
   const blob = await response.blob();
   await touchAsset({ url: source, bytes: blob.size, accessedAt: Date.now() });
-  await pruneAssets(cache);
+  if (cache) await pruneAssets(cache);
   const objectUrl = URL.createObjectURL(blob);
   return { source: objectUrl, release: () => URL.revokeObjectURL(objectUrl) };
 }

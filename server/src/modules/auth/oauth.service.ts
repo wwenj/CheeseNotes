@@ -7,10 +7,12 @@ import { GitHubService, type GitHubAccount } from '../github/github.service.js';
 
 const ALLOWED_EMAIL = 'man@wwenj.com';
 const STATE_MAX_AGE_MS = 10 * 60_000;
+const MOBILE_HANDOFF_MAX_AGE_MS = 60_000;
 const SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60_000;
 
 type OAuthPurpose = 'login' | 'repository';
-type OAuthState = { verifier: string; purpose: OAuthPurpose; userId: string; createdAt: string };
+export type OAuthClient = 'web' | 'ios';
+type OAuthState = { verifier: string; purpose: OAuthPurpose; client: OAuthClient; userId: string; createdAt: string };
 type StoredUser = SessionUser & { githubId: string };
 
 export type SessionUser = {
@@ -21,9 +23,10 @@ export type SessionUser = {
   avatarUrl: string | null;
 };
 
-export type LoginResult = { purpose: 'login'; user: SessionUser; sessionToken: string };
-export type RepositoryResult = { purpose: 'repository'; login: string };
+export type LoginResult = { purpose: 'login'; client: OAuthClient; user: SessionUser; sessionToken?: string };
+export type RepositoryResult = { purpose: 'repository'; client: OAuthClient; login: string };
 export type OAuthResult = LoginResult | RepositoryResult;
+export type MobileSessionResult = { token: string; expiresAt: string; user: SessionUser };
 
 export class GitHubAccessDeniedError extends Error {
   constructor() {
@@ -40,18 +43,18 @@ export class OAuthService {
     @Inject(GitHubService) private readonly github: GitHubService,
   ) {}
 
-  beginLogin() {
-    return this.begin('login');
+  beginLogin(client: OAuthClient = 'web') {
+    return this.begin('login', client);
   }
 
-  beginRepositoryConnection(user: SessionUser) {
-    return this.begin('repository', user.id);
+  beginRepositoryConnection(user: SessionUser, client: OAuthClient = 'web') {
+    return this.begin('repository', client, user.id);
   }
 
   async finishWeb(code: string, state: string, currentUserId?: string): Promise<OAuthResult> {
     const row = this.consumeState(state);
     const config = runtimeConfig();
-    if (row.purpose === 'repository' && (!currentUserId || currentUserId !== row.userId)) {
+    if (row.purpose === 'repository' && row.client === 'web' && (!currentUserId || currentUserId !== row.userId)) {
       throw new BadRequestException('登录状态已失效，请重新登录后连接 GitHub');
     }
 
@@ -61,14 +64,20 @@ export class OAuthService {
       const email = this.allowedEmail(account);
       if (!email) throw new GitHubAccessDeniedError();
       const user = this.upsertUser(account, email);
-      return { purpose: 'login', user, sessionToken: this.createSession(user.id) };
+      return { purpose: 'login', client: row.client, user, ...(row.client === 'web' ? { sessionToken: this.createSession(user.id).token } : {}) };
     }
 
     const account = await this.github.accountForToken(token);
     const owner = this.userById(row.userId);
     if (!owner || owner.githubId !== account.id) throw new BadRequestException('当前 GitHub 账号与登录账号不一致，请重新连接');
     this.github.saveToken(token, account);
-    return { purpose: 'repository', login: account.login };
+    return { purpose: 'repository', client: row.client, login: account.login };
+  }
+
+  clientForState(state: string | undefined): OAuthClient {
+    if (!state) return 'web';
+    const row = this.database.db.prepare('SELECT client FROM oauth_web_states WHERE state=?').get(state) as { client?: string } | undefined;
+    return row?.client === 'ios' ? 'ios' : 'web';
   }
 
   session(token: string | undefined): SessionUser | null {
@@ -89,6 +98,31 @@ export class OAuthService {
     if (token) this.database.db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(this.tokenHash(token));
   }
 
+  createMobileHandoff(userId: string) {
+    const handoff = randomBytes(32).toString('base64url');
+    const timestamp = now();
+    this.database.db.prepare('DELETE FROM mobile_auth_handoffs WHERE expires_at <= ?').run(timestamp);
+    this.database.db.prepare('INSERT INTO mobile_auth_handoffs(token_hash,user_id,created_at,expires_at) VALUES(?,?,?,?)')
+      .run(this.tokenHash(handoff), userId, timestamp, new Date(Date.now() + MOBILE_HANDOFF_MAX_AGE_MS).toISOString());
+    return handoff;
+  }
+
+  exchangeMobileHandoff(handoff: string): MobileSessionResult {
+    const timestamp = now();
+    const hash = this.tokenHash(handoff);
+    const row = this.database.db.prepare(`
+      SELECT u.id, u.github_id, u.github_login, u.email, u.avatar_url
+      FROM mobile_auth_handoffs h JOIN users u ON u.id = h.user_id
+      WHERE h.token_hash = ? AND h.expires_at > ?
+    `).get(hash, timestamp) as {
+      id: string; github_id: string; github_login: string; email: string; avatar_url: string;
+    } | undefined;
+    this.database.db.prepare('DELETE FROM mobile_auth_handoffs WHERE token_hash = ? OR expires_at <= ?').run(hash, timestamp);
+    if (!row) throw new BadRequestException('移动端登录已过期，请重新使用 GitHub 登录');
+    const token = this.createSession(row.id);
+    return { token: token.token, expiresAt: token.expiresAt, user: this.toSessionUser(row) };
+  }
+
   connectionStatus(user: SessionUser, repository: string) {
     const connected = this.github.hasConnectionFor(user.githubId);
     return { connected, login: connected ? this.github.login() || null : null, repository: connected ? repository || null : null };
@@ -98,14 +132,14 @@ export class OAuthService {
     this.github.clearToken();
   }
 
-  private begin(purpose: OAuthPurpose, userId = '') {
+  private begin(purpose: OAuthPurpose, client: OAuthClient, userId = '') {
     const config = runtimeConfig();
     const state = randomBytes(24).toString('base64url');
     const verifier = randomBytes(48).toString('base64url');
     const challenge = createHash('sha256').update(verifier).digest('base64url');
     this.database.db.prepare('DELETE FROM oauth_web_states WHERE created_at < ?').run(new Date(Date.now() - STATE_MAX_AGE_MS).toISOString());
-    this.database.db.prepare('INSERT INTO oauth_web_states(state,client_id,client_secret,verifier,purpose,user_id,created_at) VALUES(?,?,?,?,?,?,?)')
-      .run(state, config.githubOAuthClientId, '', verifier, purpose, userId, now());
+    this.database.db.prepare('INSERT INTO oauth_web_states(state,client_id,client_secret,verifier,purpose,user_id,client,created_at) VALUES(?,?,?,?,?,?,?,?)')
+      .run(state, config.githubOAuthClientId, '', verifier, purpose, userId, client, now());
     const url = new URL('https://github.com/login/oauth/authorize');
     url.searchParams.set('client_id', config.githubOAuthClientId);
     url.searchParams.set('redirect_uri', config.githubOAuthCallbackUrl);
@@ -117,14 +151,14 @@ export class OAuthService {
   }
 
   private consumeState(state: string): OAuthState {
-    const row = this.database.db.prepare('SELECT verifier,purpose,user_id,created_at FROM oauth_web_states WHERE state=?').get(state) as {
-      verifier: string; purpose: string; user_id: string; created_at: string;
+    const row = this.database.db.prepare('SELECT verifier,purpose,user_id,client,created_at FROM oauth_web_states WHERE state=?').get(state) as {
+      verifier: string; purpose: string; user_id: string; client: string; created_at: string;
     } | undefined;
     this.database.db.prepare('DELETE FROM oauth_web_states WHERE state=?').run(state);
-    if (!row || Date.now() - Date.parse(row.created_at) > STATE_MAX_AGE_MS || (row.purpose !== 'login' && row.purpose !== 'repository')) {
+    if (!row || Date.now() - Date.parse(row.created_at) > STATE_MAX_AGE_MS || (row.purpose !== 'login' && row.purpose !== 'repository') || (row.client !== 'web' && row.client !== 'ios')) {
       throw new BadRequestException('GitHub 授权已过期或校验失败，请重新连接');
     }
-    return { verifier: row.verifier, purpose: row.purpose, userId: row.user_id, createdAt: row.created_at };
+    return { verifier: row.verifier, purpose: row.purpose, client: row.client, userId: row.user_id, createdAt: row.created_at };
   }
 
   private allowedEmail(account: GitHubAccount) {
@@ -149,9 +183,9 @@ export class OAuthService {
     const token = randomBytes(32).toString('base64url');
     const timestamp = now();
     const expiresAt = new Date(Date.now() + SESSION_MAX_AGE_MS).toISOString();
-    this.database.db.prepare('DELETE FROM sessions WHERE user_id=? OR expires_at <= ?').run(userId, timestamp);
+    this.database.db.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(timestamp);
     this.database.db.prepare('INSERT INTO sessions(token_hash,user_id,created_at,expires_at) VALUES(?,?,?,?)').run(this.tokenHash(token), userId, timestamp, expiresAt);
-    return token;
+    return { token, expiresAt };
   }
 
   private userById(id: string): StoredUser | null {

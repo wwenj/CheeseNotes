@@ -17,7 +17,8 @@ function database() {
   db.exec(`
     CREATE TABLE users(id TEXT PRIMARY KEY, github_id TEXT NOT NULL UNIQUE, github_login TEXT NOT NULL, email TEXT NOT NULL, avatar_url TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, last_login_at TEXT NOT NULL);
     CREATE TABLE sessions(token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL);
-    CREATE TABLE oauth_web_states(state TEXT PRIMARY KEY, client_id TEXT NOT NULL, client_secret TEXT NOT NULL, verifier TEXT NOT NULL, purpose TEXT NOT NULL DEFAULT 'repository', user_id TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL);
+    CREATE TABLE mobile_auth_handoffs(token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL);
+    CREATE TABLE oauth_web_states(state TEXT PRIMARY KEY, client_id TEXT NOT NULL, client_secret TEXT NOT NULL, verifier TEXT NOT NULL, purpose TEXT NOT NULL DEFAULT 'repository', user_id TEXT NOT NULL DEFAULT '', client TEXT NOT NULL DEFAULT 'web', created_at TEXT NOT NULL);
   `);
   return { db } as DatabaseService;
 }
@@ -26,9 +27,9 @@ const account = (overrides: Partial<GitHubAccount> = {}): GitHubAccount => ({
   id: 'github-42', login: 'man', avatarUrl: null, emails: [{ email: 'man@wwenj.com', verified: true }], ...overrides,
 });
 
-function state(db: DatabaseService, value: string, purpose: 'login' | 'repository', userId = '') {
-  db.db.prepare('INSERT INTO oauth_web_states(state,client_id,client_secret,verifier,purpose,user_id,created_at) VALUES(?,?,?,?,?,?,?)')
-    .run(value, 'client-id', '', 'verifier', purpose, userId, new Date().toISOString());
+function state(db: DatabaseService, value: string, purpose: 'login' | 'repository', userId = '', client: 'web' | 'ios' = 'web') {
+  db.db.prepare('INSERT INTO oauth_web_states(state,client_id,client_secret,verifier,purpose,user_id,client,created_at) VALUES(?,?,?,?,?,?,?,?)')
+    .run(value, 'client-id', '', 'verifier', purpose, userId, client, new Date().toISOString());
 }
 
 function fixture() {
@@ -55,6 +56,7 @@ describe('GitHub whitelist login', () => {
     expect(result.purpose).toBe('login');
     if (result.purpose !== 'login') throw new Error('expected login result');
     expect(result.user).toMatchObject({ githubId: 'github-42', login: 'man', email: 'man@wwenj.com' });
+    expect(result.sessionToken).toBeTruthy();
     expect(oauth.session(result.sessionToken)).toEqual(result.user);
     expect(github.accountForToken).toHaveBeenCalledWith('github-token', true);
     expect(db.db.prepare('SELECT count(*) AS count FROM users').get()).toEqual({ count: 1 });
@@ -90,6 +92,26 @@ describe('GitHub whitelist login', () => {
     expect(db.db.prepare('SELECT count(*) AS count FROM users').get()).toEqual({ count: 1 });
   });
 
+  it('creates and consumes a short-lived mobile handoff without invalidating the web session', async () => {
+    const { db, oauth } = fixture();
+    state(db, 'web-login', 'login');
+    const web = await oauth.finishWeb('code', 'web-login');
+    if (web.purpose !== 'login' || !web.sessionToken) throw new Error('expected web login');
+
+    state(db, 'ios-login', 'login', '', 'ios');
+    const mobile = await oauth.finishWeb('code', 'ios-login');
+    if (mobile.purpose !== 'login') throw new Error('expected mobile login');
+    expect(mobile.client).toBe('ios');
+    expect(mobile.sessionToken).toBeUndefined();
+
+    const handoff = oauth.createMobileHandoff(mobile.user.id);
+    const session = oauth.exchangeMobileHandoff(handoff);
+    expect(oauth.session(web.sessionToken)).toEqual(web.user);
+    expect(oauth.session(session.token)).toEqual(mobile.user);
+    expect(db.db.prepare('SELECT count(*) AS count FROM sessions').get()).toEqual({ count: 2 });
+    expect(() => oauth.exchangeMobileHandoff(handoff)).toThrow('移动端登录已过期');
+  });
+
   it('only stores a repository token when its GitHub identity matches the signed-in user', async () => {
     const { db, github, oauth } = fixture();
     state(db, 'login-user', 'login');
@@ -99,8 +121,11 @@ describe('GitHub whitelist login', () => {
 
     const result = await oauth.finishWeb('repo-code', 'repository', login.user.id);
 
-    expect(result).toEqual({ purpose: 'repository', login: 'man' });
+    expect(result).toEqual({ purpose: 'repository', client: 'web', login: 'man' });
     expect(github.saveToken).toHaveBeenCalledWith('github-token', expect.objectContaining({ id: 'github-42', login: 'man' }));
+
+    state(db, 'repository-ios', 'repository', login.user.id, 'ios');
+    await expect(oauth.finishWeb('repo-code', 'repository-ios')).resolves.toEqual({ purpose: 'repository', client: 'ios', login: 'man' });
   });
 });
 
@@ -118,5 +143,21 @@ describe('SessionGuard', () => {
 
     expect(guard.canActivate(context)).toBe(true);
     expect(() => guard.canActivate(context)).toThrow(UnauthorizedException);
+  });
+
+  it('uses a bearer token when a mobile request has no session cookie', () => {
+    const user = { id: 'user-1' };
+    const oauth = { session: vi.fn().mockReturnValue(user) } as unknown as OAuthService;
+    const reflector = { getAllAndOverride: vi.fn().mockReturnValue(false) } as never;
+    const guard = new SessionGuard(reflector, oauth);
+    const request = { cookies: {}, headers: { authorization: 'Bearer mobile-session-token' } };
+    const context = {
+      getHandler: () => undefined,
+      getClass: () => undefined,
+      switchToHttp: () => ({ getRequest: () => request }),
+    } as never;
+
+    expect(guard.canActivate(context)).toBe(true);
+    expect(oauth.session).toHaveBeenCalledWith('mobile-session-token');
   });
 });

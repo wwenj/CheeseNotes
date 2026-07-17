@@ -1,11 +1,23 @@
-import { Controller, Delete, Get, Inject, Logger, Post, Query, Req, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Logger, Post, Query, Req, Res } from '@nestjs/common';
+import { IsIn, IsOptional, IsString } from 'class-validator';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { runtimeConfig } from '../../config/runtime.config.js';
 import { RepositoryService } from '../settings/repository.service.js';
 import { SyncService } from '../sync/sync.service.js';
-import { currentUser } from './session.guard.js';
-import { GitHubAccessDeniedError, OAuthService } from './oauth.service.js';
+import { currentUser, sessionTokenFromRequest } from './session.guard.js';
+import { GitHubAccessDeniedError, OAuthService, type OAuthClient } from './oauth.service.js';
 import { Public } from './public.decorator.js';
+
+class OAuthClientDto {
+  @IsOptional()
+  @IsIn(['web', 'ios'])
+  client?: OAuthClient;
+}
+
+class MobileHandoffDto {
+  @IsString()
+  handoff!: string;
+}
 
 @Controller('auth')
 export class AuthController {
@@ -19,13 +31,13 @@ export class AuthController {
 
   @Public()
   @Post('github/login')
-  startLogin() {
-    return this.oauth.beginLogin();
+  startLogin(@Body() body?: OAuthClientDto) {
+    return this.oauth.beginLogin(body?.client ?? 'web');
   }
 
   @Post('github/connect')
-  startRepositoryConnection(@Req() request: FastifyRequest) {
-    return this.oauth.beginRepositoryConnection(currentUser(request));
+  startRepositoryConnection(@Req() request: FastifyRequest, @Body() body?: OAuthClientDto) {
+    return this.oauth.beginRepositoryConnection(currentUser(request), body?.client ?? 'web');
   }
 
   @Public()
@@ -37,12 +49,17 @@ export class AuthController {
     @Req() request: FastifyRequest,
     @Res() reply: FastifyReply,
   ) {
-    const base = runtimeConfig().webOrigin;
+    const client = this.oauth.clientForState(state);
+    const base = this.callbackBase(client);
     if (error || !code || !state) return reply.code(302).redirect(this.redirect(base, 'auth', 'error', error || '授权被取消'));
     try {
       const user = this.oauth.session(request.cookies?.[OAuthService.sessionCookieName]);
       const result = await this.oauth.finishWeb(code, state, user?.id);
       if (result.purpose === 'login') {
+        if (result.client === 'ios') {
+          return reply.code(302).redirect(this.redirect(base, 'auth', 'success', undefined, this.oauth.createMobileHandoff(result.user.id)));
+        }
+        if (!result.sessionToken) throw new Error('Web 登录未能建立会话');
         reply.setCookie(OAuthService.sessionCookieName, result.sessionToken, this.sessionCookieOptions());
         return reply.code(302).redirect(this.redirect(base, 'auth', 'success'));
       }
@@ -59,13 +76,19 @@ export class AuthController {
   @Public()
   @Get('session')
   session(@Req() request: FastifyRequest) {
-    const user = this.oauth.session(request.cookies?.[OAuthService.sessionCookieName]);
+    const user = this.oauth.session(sessionTokenFromRequest(request));
     return { authenticated: Boolean(user), user };
+  }
+
+  @Public()
+  @Post('mobile/session/exchange')
+  exchangeMobileSession(@Body() body: MobileHandoffDto) {
+    return this.oauth.exchangeMobileHandoff(body.handoff);
   }
 
   @Post('logout')
   logout(@Req() request: FastifyRequest, @Res() reply: FastifyReply) {
-    this.oauth.logout(request.cookies?.[OAuthService.sessionCookieName]);
+    this.oauth.logout(sessionTokenFromRequest(request));
     reply.clearCookie(OAuthService.sessionCookieName, this.sessionCookieOptions());
     return reply.send({ ok: true });
   }
@@ -84,10 +107,16 @@ export class AuthController {
     return this.oauth.connectionStatus(currentUser(request), this.repository.get());
   }
 
-  private redirect(base: string, key: 'auth' | 'github', value: string, reason?: string) {
+  private callbackBase(client: OAuthClient) {
+    const config = runtimeConfig();
+    return client === 'ios' ? config.iosUniversalLink : config.webOrigin;
+  }
+
+  private redirect(base: string, key: 'auth' | 'github', value: string, reason?: string, handoff?: string) {
     const url = new URL(base);
     url.searchParams.set(key, value);
     if (reason) url.searchParams.set('reason', reason);
+    if (handoff) url.searchParams.set('handoff', handoff);
     return url.toString();
   }
 

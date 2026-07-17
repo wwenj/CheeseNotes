@@ -15,6 +15,9 @@
     "ios:build:simulator": "pnpm ios:sync && xcodebuild -workspace ios/App/App.xcworkspace -scheme App -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -configuration Debug CODE_SIGNING_ALLOWED=NO build"
   },
   "dependencies": {
+    "@aparajita/capacitor-secure-storage": "^8.0.0",
+    "@capacitor/app": "8.1.1",
+    "@capacitor/browser": "8.0.4",
     "@capacitor/core": "8.4.1",
     "@capacitor/ios": "8.4.1"
   },

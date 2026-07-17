@@ -1,13 +1,13 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Check, Github, LoaderCircle, ShieldAlert, ShieldCheck } from 'lucide-react';
-import { authApi, githubApi, type GitHubRepository, type SyncStatus } from '../../api';
+import { githubApi, type GitHubRepository, type SyncStatus } from '../../api';
 import { formatBytes, messageOf, phaseText } from '../../app/constants';
 
 export function SetupScreen({ feedback, children }: { feedback?: ReactNode; children: ReactNode }) {
   return <main className="setup-screen">{feedback}{children}</main>;
 }
 
-export function GitHubLogin({ error }: { error: string | null }) {
+export function GitHubLogin({ error, onLogin }: { error: string | null; onLogin: () => Promise<void> }) {
   const [localError, setLocalError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -15,8 +15,7 @@ export function GitHubLogin({ error }: { error: string | null }) {
     setSubmitting(true);
     setLocalError(null);
     try {
-      const authorization = await authApi.startGitHubLogin();
-      window.location.href = authorization.url;
+      await onLogin();
     } catch (reason) {
       setLocalError(messageOf(reason));
     } finally {
@@ -43,7 +42,7 @@ export function AccessDenied({ onRetry }: { onRetry: () => void }) {
   </section>;
 }
 
-export function ConnectGitHub({ error }: { error: string | null }) {
+export function ConnectGitHub({ error, onConnect }: { error: string | null; onConnect: () => Promise<void> }) {
   const [localError, setLocalError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -51,8 +50,7 @@ export function ConnectGitHub({ error }: { error: string | null }) {
     setSubmitting(true);
     setLocalError(null);
     try {
-      const authorization = await githubApi.startRepositoryAuthorization();
-      window.location.href = authorization.url;
+      await onConnect();
     } catch (reason) {
       setLocalError(messageOf(reason));
     } finally {

@@ -8,6 +8,18 @@ importers:
 
   .:
     dependencies:
+      '@aparajita/capacitor-secure-storage':
+        specifier: ^8.0.0
+        version: 8.0.0
+      '@capacitor/app':
+        specifier: 8.1.1
+        version: 8.1.1(@capacitor/core@8.4.1)
+      '@capacitor/browser':
+        specifier: 8.0.4
+        version: 8.0.4(@capacitor/core@8.4.1)
+      '@capacitor/core':
+        specifier: 8.4.1
+        version: 8.4.1
       '@codemirror/commands':
         specifier: ^6.10.4
         version: 6.10.4
@@ -77,6 +89,10 @@ importers:
         version: 4.1.10(jsdom@29.1.1)(vite@7.3.6(jiti@2.7.0)(lightningcss@1.32.0))
 
 packages:
+
+  '@aparajita/capacitor-secure-storage@8.0.0':
+    resolution: {integrity: sha1-nH3cMW3Nz1qMF9FLR+az1B02EBg=}
+    engines: {node: '>=20.0.0'}
 
   '@asamuzakjp/css-color@5.1.11':
     resolution: {integrity: sha1-KKCqyCIKTMGQRaw72agT1AYL03U=}
@@ -183,6 +199,34 @@ packages:
   '@bramus/specificity@2.4.2':
     resolution: {integrity: sha1-qo246xc/3ucyT4IoSDMQat7sxkg=}
     hasBin: true
+
+  '@capacitor/android@8.4.2':
+    resolution: {integrity: sha1-02sapvE5QNJcEkC4nEvX+AR9c54=}
+    peerDependencies:
+      '@capacitor/core': ^8.4.0
+
+  '@capacitor/app@8.1.1':
+    resolution: {integrity: sha1-rwBknQx3meyDRpscStqSH5kzp34=}
+    peerDependencies:
+      '@capacitor/core': '>=8.0.0'
+
+  '@capacitor/browser@8.0.4':
+    resolution: {integrity: sha1-alHgOj9mkPrRvGOObaDDAkGAiKI=}
+    peerDependencies:
+      '@capacitor/core': '>=8.0.0'
+
+  '@capacitor/core@8.4.1':
+    resolution: {integrity: sha1-bprzRkKxciMn2mEjznDLFKaNP50=}
+
+  '@capacitor/ios@8.4.2':
+    resolution: {integrity: sha1-PtbnIDpbFeYmsfvVAf88/R3a+LE=}
+    peerDependencies:
+      '@capacitor/core': ^8.4.0
+
+  '@capacitor/keyboard@8.0.5':
+    resolution: {integrity: sha1-fsYPJ3SbBK66FvfsIy55R/Tln5Q=}
+    peerDependencies:
+      '@capacitor/core': '>=8.0.0'
 
   '@codemirror/autocomplete@6.20.3':
     resolution: {integrity: sha1-aWt0AxLGqWLhRWe0mjZhtZJLxa4=}
@@ -1439,6 +1483,9 @@ packages:
   trough@2.2.0:
     resolution: {integrity: sha1-lKYL1r03XBUsHfkRpLEdWwJW9Q8=}
 
+  tslib@2.8.1:
+    resolution: {integrity: sha1-YS7+TtI11Wfoq6Xypfq3AoCt6D8=}
+
   typescript@5.9.3:
     resolution: {integrity: sha1-W09Z4VMQqxeiFvXWz1PuR27eZw8=}
     engines: {node: '>=14.17'}
@@ -1598,6 +1645,14 @@ packages:
 
 snapshots:
 
+  '@aparajita/capacitor-secure-storage@8.0.0':
+    dependencies:
+      '@capacitor/android': 8.4.2(@capacitor/core@8.4.1)
+      '@capacitor/app': 8.1.1(@capacitor/core@8.4.1)
+      '@capacitor/core': 8.4.1
+      '@capacitor/ios': 8.4.2(@capacitor/core@8.4.1)
+      '@capacitor/keyboard': 8.0.5(@capacitor/core@8.4.1)
+
   '@asamuzakjp/css-color@5.1.11':
     dependencies:
       '@asamuzakjp/generational-cache': 1.0.1
@@ -1735,6 +1790,30 @@ snapshots:
   '@bramus/specificity@2.4.2':
     dependencies:
       css-tree: 3.2.1
+
+  '@capacitor/android@8.4.2(@capacitor/core@8.4.1)':
+    dependencies:
+      '@capacitor/core': 8.4.1
+
+  '@capacitor/app@8.1.1(@capacitor/core@8.4.1)':
+    dependencies:
+      '@capacitor/core': 8.4.1
+
+  '@capacitor/browser@8.0.4(@capacitor/core@8.4.1)':
+    dependencies:
+      '@capacitor/core': 8.4.1
+
+  '@capacitor/core@8.4.1':
+    dependencies:
+      tslib: 2.8.1
+
+  '@capacitor/ios@8.4.2(@capacitor/core@8.4.1)':
+    dependencies:
+      '@capacitor/core': 8.4.1
+
+  '@capacitor/keyboard@8.0.5(@capacitor/core@8.4.1)':
+    dependencies:
+      '@capacitor/core': 8.4.1
 
   '@codemirror/autocomplete@6.20.3':
     dependencies:
@@ -3113,6 +3192,8 @@ snapshots:
   trim-lines@3.0.1: {}
 
   trough@2.2.0: {}
+
+  tslib@2.8.1: {}
 
   typescript@5.9.3: {}
 

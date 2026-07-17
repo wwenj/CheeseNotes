@@ -8,6 +8,15 @@ importers:
 
   .:
     dependencies:
+      '@aparajita/capacitor-secure-storage':
+        specifier: ^8.0.0
+        version: 8.0.0
+      '@capacitor/app':
+        specifier: 8.1.1
+        version: 8.1.1(@capacitor/core@8.4.1)
+      '@capacitor/browser':
+        specifier: 8.0.4
+        version: 8.0.4(@capacitor/core@8.4.1)
       '@capacitor/core':
         specifier: 8.4.1
         version: 8.4.1
@@ -27,6 +36,10 @@ importers:
 
 packages:
 
+  '@aparajita/capacitor-secure-storage@8.0.0':
+    resolution: {integrity: sha1-nH3cMW3Nz1qMF9FLR+az1B02EBg=}
+    engines: {node: '>=20.0.0'}
+
   '@babel/code-frame@7.29.7':
     resolution: {integrity: sha1-8vu/6ofESiFZDsUVt3iywm2IZuc=}
     engines: {node: '>=6.9.0'}
@@ -35,10 +48,25 @@ packages:
     resolution: {integrity: sha1-vYcITO0MeW7Ea9pJLeboPSnon8I=}
     engines: {node: '>=6.9.0'}
 
+  '@capacitor/android@8.4.2':
+    resolution: {integrity: sha1-02sapvE5QNJcEkC4nEvX+AR9c54=}
+    peerDependencies:
+      '@capacitor/core': ^8.4.0
+
+  '@capacitor/app@8.1.1':
+    resolution: {integrity: sha1-rwBknQx3meyDRpscStqSH5kzp34=}
+    peerDependencies:
+      '@capacitor/core': '>=8.0.0'
+
   '@capacitor/assets@3.0.5':
     resolution: {integrity: sha1-VcZkWOcDzpXi4xiMqti5h7lLZvA=}
     engines: {node: '>=10.3.0'}
     hasBin: true
+
+  '@capacitor/browser@8.0.4':
+    resolution: {integrity: sha1-alHgOj9mkPrRvGOObaDDAkGAiKI=}
+    peerDependencies:
+      '@capacitor/core': '>=8.0.0'
 
   '@capacitor/cli@5.7.8':
     resolution: {integrity: sha1-D9KFabKGGS23EzXb0WIiw0EyJ4U=}
@@ -57,6 +85,11 @@ packages:
     resolution: {integrity: sha1-r8SDaCQG6uGnA+h1EILhv8n+hlI=}
     peerDependencies:
       '@capacitor/core': ^8.4.0
+
+  '@capacitor/keyboard@8.0.5':
+    resolution: {integrity: sha1-fsYPJ3SbBK66FvfsIy55R/Tln5Q=}
+    peerDependencies:
+      '@capacitor/core': '>=8.0.0'
 
   '@cspotcode/source-map-support@0.8.1':
     resolution: {integrity: sha1-AGKcNaaI4FqIsc2mhPudXnPwAKE=}
@@ -1524,6 +1557,14 @@ packages:
 
 snapshots:
 
+  '@aparajita/capacitor-secure-storage@8.0.0':
+    dependencies:
+      '@capacitor/android': 8.4.2(@capacitor/core@8.4.1)
+      '@capacitor/app': 8.1.1(@capacitor/core@8.4.1)
+      '@capacitor/core': 8.4.1
+      '@capacitor/ios': 8.4.1(@capacitor/core@8.4.1)
+      '@capacitor/keyboard': 8.0.5(@capacitor/core@8.4.1)
+
   '@babel/code-frame@7.29.7':
     dependencies:
       '@babel/helper-validator-identifier': 7.29.7
@@ -1531,6 +1572,14 @@ snapshots:
       picocolors: 1.1.1
 
   '@babel/helper-validator-identifier@7.29.7': {}
+
+  '@capacitor/android@8.4.2(@capacitor/core@8.4.1)':
+    dependencies:
+      '@capacitor/core': 8.4.1
+
+  '@capacitor/app@8.1.1(@capacitor/core@8.4.1)':
+    dependencies:
+      '@capacitor/core': 8.4.1
 
   '@capacitor/assets@3.0.5(@types/node@26.1.1)(typescript@5.9.2)':
     dependencies:
@@ -1556,6 +1605,10 @@ snapshots:
       - react-native-b4a
       - supports-color
       - typescript
+
+  '@capacitor/browser@8.0.4(@capacitor/core@8.4.1)':
+    dependencies:
+      '@capacitor/core': 8.4.1
 
   '@capacitor/cli@5.7.8':
     dependencies:
@@ -1606,6 +1659,10 @@ snapshots:
       tslib: 2.8.1
 
   '@capacitor/ios@8.4.1(@capacitor/core@8.4.1)':
+    dependencies:
+      '@capacitor/core': 8.4.1
+
+  '@capacitor/keyboard@8.0.5(@capacitor/core@8.4.1)':
     dependencies:
       '@capacitor/core': 8.4.1
 

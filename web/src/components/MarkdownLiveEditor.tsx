@@ -7,6 +7,7 @@ import { tags } from '@lezer/highlight';
 import { Decoration, EditorView, keymap, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { notesApi, type NoteSummary } from '../api';
 import { fileKind, resolveVaultPath } from '../lib/files';
+import { cachedAssetSource } from '../lib/workspace-cache';
 
 type MarkerRange = { from: number; to: number };
 type ImagePreview = { alt: string; src: string };
@@ -30,6 +31,8 @@ const visibleCodeMarker = Decoration.mark({ class: 'cm-md-syntax cm-md-code' });
 const visibleHeadingMarkers = Array.from({ length: 6 }, (_, index) => Decoration.mark({ class: `cm-md-syntax cm-md-heading-${index + 1}` }));
 
 class ImagePreviewWidget extends WidgetType {
+  private release = () => {};
+
   constructor(private readonly image: ImagePreview, private readonly position: number) { super(); }
 
   eq(other: ImagePreviewWidget) { return other.image.src === this.image.src && other.image.alt === this.image.alt && other.position === this.position; }
@@ -41,13 +44,24 @@ class ImagePreviewWidget extends WidgetType {
     wrapper.className = 'cm-image-preview';
     wrapper.dataset.imageFrom = String(this.position);
     const image = document.createElement('img');
-    image.src = this.image.src;
     image.alt = this.image.alt;
     image.loading = 'lazy';
     image.addEventListener('error', () => { wrapper.classList.add('is-broken'); });
     wrapper.append(image);
+    if (!this.image.src.startsWith(notesApi.fileUrl(''))) {
+      image.src = this.image.src;
+      return wrapper;
+    }
+    void cachedAssetSource(this.image.src).then((result) => {
+      this.release = result.release;
+      image.src = result.source;
+    }).catch(() => {
+      image.src = this.image.src;
+    });
     return wrapper;
   }
+
+  destroy() { this.release(); }
 }
 
 class ListMarkerWidget extends WidgetType {

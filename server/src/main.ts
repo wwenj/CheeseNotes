@@ -35,9 +35,22 @@ async function bootstrap() {
       methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     });
   }
+  const fastify = app.getHttpAdapter().getInstance();
+  fastify.get('/.well-known/apple-app-site-association', async (_request: FastifyRequest, reply: FastifyReply) => {
+    return reply
+      .type('application/json; charset=utf-8')
+      .header('Cache-Control', 'public, max-age=3600')
+      .send({ applinks: { details: [{ appIDs: [config.iosAppId], components: [{ '/': '/ios/auth/*' }] }] } });
+  });
+  fastify.get('/ios/auth/callback', async (_request: FastifyRequest, reply: FastifyReply) => {
+    return reply
+      .type('text/html; charset=utf-8')
+      .header('Cache-Control', 'no-store')
+      .header('Referrer-Policy', 'no-referrer')
+      .send('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>芝士</title><body style="margin:0;display:grid;min-height:100vh;place-items:center;background:#fff;color:#303b49;font:16px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif"><main style="text-align:center"><strong style="font-size:24px">芝士</strong><p>请返回 App 继续登录。</p></main></body></html>');
+  });
   const publicDir = resolve(process.cwd(), 'public');
   if (existsSync(publicDir)) {
-    const fastify = app.getHttpAdapter().getInstance();
     const indexPath = resolve(publicDir, 'index.html');
     fastify.get('/assets/:file', async (request: FastifyRequest<{ Params: { file: string } }>, reply: FastifyReply) => {
       const { file } = request.params;

@@ -1,5 +1,5 @@
 import { useRef, useState, type TouchEvent } from 'react';
-import { ArrowLeft, ChevronRight, CircleHelp, Github, Info, SlidersHorizontal, Type, X } from 'lucide-react';
+import { ArrowLeft, ChevronRight, CircleHelp, Github, Info, LogOut, SlidersHorizontal, Type, X } from 'lucide-react';
 import type { GitHubConnection } from '../../api';
 import { defaultClientSettings } from '../../app/constants';
 
@@ -12,6 +12,7 @@ type RepositorySettingsProps = {
   onReaderFontSizeChange: (value: number) => void;
   onClearReadingCache: () => Promise<void>;
   onDisconnect: () => Promise<void>;
+  onLogout: () => Promise<void>;
   onClose: () => void;
 };
 
@@ -37,7 +38,7 @@ function SettingsPageHeader({ title, onBack, onClose }: { title: string; onBack?
   </header>;
 }
 
-export default function RepositorySettings({ repository, auth, readerFontSize, onReaderFontSizeChange, onClearReadingCache, onDisconnect, onClose }: RepositorySettingsProps) {
+export default function RepositorySettings({ repository, auth, readerFontSize, onReaderFontSizeChange, onClearReadingCache, onDisconnect, onLogout, onClose }: RepositorySettingsProps) {
   const [page, setPage] = useState<SettingsPage>('menu');
   const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
@@ -101,6 +102,7 @@ export default function RepositorySettings({ repository, auth, readerFontSize, o
         <SettingsMenuItem icon={Type} title="阅读与编辑" onClick={() => setPage('reader')} />
         <SettingsMenuItem icon={Github} title="仓库与同步" onClick={() => setPage('repository')} />
         <SettingsMenuItem icon={Info} title="关于芝士" onClick={() => setPage('about')} />
+        <SettingsMenuItem icon={LogOut} title="退出登录" onClick={() => void onLogout()} />
       </nav>
     </div>
   </section>;

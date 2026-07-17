@@ -22,6 +22,8 @@ export type RuntimeConfig = {
   githubOAuthCallbackUrl: string;
   corsOrigins: string[];
   sessionCookieDomain?: string;
+  iosUniversalLink: string;
+  iosAppId: string;
 };
 
 const githubOAuthConfigPath = () => resolve(process.cwd(), 'config', 'github-oauth.local.json');
@@ -85,8 +87,21 @@ const githubOAuthSettings = (): GitHubOAuthSettings => {
   };
 };
 
+const iosUniversalLink = () => {
+  const value = process.env.IOS_UNIVERSAL_LINK || 'https://note.wwenj.com/ios/auth/callback';
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error('IOS_UNIVERSAL_LINK 必须是完整 HTTPS URL。');
+  }
+  if (url.protocol !== 'https:') throw new Error('IOS_UNIVERSAL_LINK 必须使用 HTTPS。');
+  return url.href.replace(/\/$/, '');
+};
+
 export const runtimeConfig = (): RuntimeConfig => {
   const oauth = githubOAuthSettings();
+  const mobileCallback = iosUniversalLink();
   const corsOriginSetting = process.env.CORS_ORIGINS ?? 'capacitor://localhost';
   const corsOrigins = [...new Set([new URL(oauth.homepageUrl).origin, ...corsOriginSetting.split(',').map((value) => value.trim()).filter(Boolean)])];
   return {
@@ -100,5 +115,7 @@ export const runtimeConfig = (): RuntimeConfig => {
     githubOAuthCallbackUrl: oauth.authorizationCallbackUrl,
     corsOrigins,
     sessionCookieDomain: oauth.sessionCookieDomain,
+    iosUniversalLink: mobileCallback,
+    iosAppId: process.env.IOS_APP_ID || '6A36R6LTT2.com.wwenj.noteai.capacitor',
   };
 };

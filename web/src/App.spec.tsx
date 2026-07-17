@@ -6,7 +6,10 @@ import App from './App';
 const api = vi.hoisted(() => ({
   session: vi.fn(),
   startGitHubLogin: vi.fn(),
+  exchangeMobileSession: vi.fn(),
 }));
+
+const github = vi.hoisted(() => ({ startRepositoryAuthorization: vi.fn() }));
 
 const workspace = vi.hoisted(() => ({
   resetEditor: vi.fn(), reload: vi.fn(), setNotice: vi.fn(), setError: vi.fn(), setSync: vi.fn(),
@@ -21,7 +24,16 @@ const workspace = vi.hoisted(() => ({
 
 vi.mock('./api', () => ({
   authApi: api,
+  githubApi: github,
   authExpiredEvent: 'noteai:auth-expired',
+}));
+vi.mock('./api/mobile-auth', () => ({
+  listenForMobileAuthCallback: vi.fn().mockResolvedValue(() => undefined),
+  openAuthorization: vi.fn(),
+}));
+vi.mock('./api/mobile-session', () => ({
+  isNativeIOS: () => false,
+  clearMobileSessionToken: vi.fn(),
 }));
 vi.mock('./app/useWorkspaceController', () => ({ useWorkspaceController: () => workspace }));
 vi.mock('./app/routes', () => ({

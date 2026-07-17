@@ -1,6 +1,6 @@
 export { ApiError, authExpiredEvent, notifyAuthExpired, saveServiceUrl, serviceUrl } from './http';
 export { authApi } from './auth';
-export type { AuthSession, CurrentUser } from './auth';
+export type { AuthClient, AuthSession, CurrentUser, MobileSession } from './auth';
 export { notesApi } from './notes';
 export type { FolderResult, Note, NoteSummary } from './notes';
 export { syncApi } from './sync';

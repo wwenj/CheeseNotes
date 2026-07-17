@@ -56,7 +56,19 @@ pnpm ios:sync:production
 pnpm ios:open
 ```
 
-`ios:sync:production` 会将 `https://note.wwenj.com` 写入独立打包副本。线上 API 必须允许 `capacitor://localhost` 的 CORS；当前已验证预检通过。GitHub OAuth 的服务器回跳地址从本地配置文件读取；自动回到 iOS App 仍需要后续 Deep Link 支持。
+`ios:sync:production` 会将 `https://note.wwenj.com` 写入独立打包副本。线上 API 必须允许 `capacitor://localhost` 的 CORS；当前已验证预检通过。
+
+## GitHub 登录回跳
+
+iOS 使用系统浏览器完成 GitHub 授权，不复用 Web Cookie。服务端白名单校验通过后经 Universal Link 回到 App，App 将独立 Bearer session 存入 iOS Keychain。
+
+上线前必须确认：
+
+- GitHub OAuth callback 为 `https://note.wwenj.com/api/auth/github/callback`。
+- `https://note.wwenj.com/.well-known/apple-app-site-association` 返回 JSON、无重定向，且包含 `6A36R6LTT2.com.wwenj.noteai.capacitor` 和 `/ios/auth/*`。
+- Xcode 使用 `App/App.entitlements` 的 `applinks:note.wwenj.com`。部署 AASA 后重新安装 App 再做真机验证。
+
+服务端默认回跳地址为 `https://note.wwenj.com/ios/auth/callback`。如使用独立生产域名，可通过 `IOS_UNIVERSAL_LINK` 和 `IOS_APP_ID` 环境变量覆盖；两者必须与 AASA 和 Xcode 签名信息一致。
 
 ## 命令
 

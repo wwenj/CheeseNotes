@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState, type ImgHTMLAttributes } from 'react';
+import { isNativeIOS } from '../api/mobile-session';
 import { cachedAssetSource } from '../lib/workspace-cache';
 
 type CachedImageProps = Omit<ImgHTMLAttributes<HTMLImageElement>, 'src'> & {
   src: string;
   cache?: boolean;
+  onSourceError?: () => void;
 };
 
-export default function CachedImage({ src, cache = false, loading = 'lazy', decoding = 'async', ...props }: CachedImageProps) {
+export default function CachedImage({ src, cache = false, loading = 'lazy', decoding = 'async', onSourceError, ...props }: CachedImageProps) {
   const image = useRef<HTMLImageElement>(null);
   const [visible, setVisible] = useState(loading !== 'lazy');
   const [resolvedSource, setResolvedSource] = useState<string | null>(loading === 'lazy' ? null : src);
@@ -40,13 +42,15 @@ export default function CachedImage({ src, cache = false, loading = 'lazy', deco
       if (active) setResolvedSource(result.source);
       else release();
     }).catch(() => {
-      if (active) setResolvedSource(src);
+      if (!active) return;
+      onSourceError?.();
+      if (!isNativeIOS()) setResolvedSource(src);
     });
     return () => {
       active = false;
       release();
     };
-  }, [cache, src, visible]);
+  }, [cache, onSourceError, src, visible]);
 
   return <img ref={image} {...props} src={resolvedSource ?? undefined} loading={loading} decoding={decoding} />;
 }
