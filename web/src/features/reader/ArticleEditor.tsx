@@ -1,11 +1,11 @@
-import { useRef, useState, type CSSProperties } from 'react';
+import { memo, useRef, useState, type CSSProperties } from 'react';
 import type { NoteSummary } from '../../api';
 import MarkdownLiveEditor from '../../components/MarkdownLiveEditor';
 import type { Draft } from '../../app/types';
 import { splitArticle } from '../../lib/article';
 import { displayName } from '../../lib/files';
 
-export default function ArticleEditor({ draft, readerFontSize, sourcePath, files, onChange, onSave }: { draft: Draft; readerFontSize: number; sourcePath: string; files: NoteSummary[]; onChange: (content: string) => void; onSave: () => void }) {
+function ArticleEditor({ draft, readerFontSize, sourcePath, files, onChange, onSave }: { draft: Draft; readerFontSize: number; sourcePath: string; files: NoteSummary[]; onChange: (content: string) => void; onSave: () => void }) {
   const article = splitArticle(draft.content, sourcePath);
   const hasTitle = /^\uFEFF?\s*#\s+/.test(draft.content);
   const [title, setTitle] = useState(article.title);
@@ -27,3 +27,5 @@ export default function ArticleEditor({ draft, readerFontSize, sourcePath, files
     <MarkdownLiveEditor content={article.body} sourcePath={sourcePath} files={files} onChange={(body) => updateContent(title, body)} onSave={onSave} />
   </article>;
 }
+
+export default memo(ArticleEditor);

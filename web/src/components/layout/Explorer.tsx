@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { FolderOpen, RefreshCw, SlidersHorizontal } from 'lucide-react';
 import type { NoteSummary, SyncStatus } from '../../api';
 import { formatLastSync, isSyncBusy, stateText } from '../../app/constants';
@@ -29,7 +29,7 @@ export type ExplorerProps = {
   onSync: () => Promise<void>;
 };
 
-export default function Explorer({ files, folders, selectedPath, expanded, search, activeTool, sync, panel, onSearch, onToolChange, onToggle, onCollapseAll, onExpandAll, onRevealFolder, onSelect, onNewFile, onCreateFolder, onPanel, onSync }: ExplorerProps) {
+function Explorer({ files, folders, selectedPath, expanded, search, activeTool, sync, panel, onSearch, onToolChange, onToggle, onCollapseAll, onExpandAll, onRevealFolder, onSelect, onNewFile, onCreateFolder, onPanel, onSync }: ExplorerProps) {
   const [syncRequested, setSyncRequested] = useState(false);
   const syncing = syncRequested || isSyncBusy(sync);
   const conflictBlocked = sync?.syncBlockedByConflicts || sync?.state === 'conflict';
@@ -65,3 +65,5 @@ export default function Explorer({ files, folders, selectedPath, expanded, searc
     </footer>
   </div>;
 }
+
+export default memo(Explorer);

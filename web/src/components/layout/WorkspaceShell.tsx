@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { PanelLeftOpen } from 'lucide-react';
 import Explorer, { type ExplorerProps } from './Explorer';
 
@@ -37,7 +37,9 @@ export default function WorkspaceShell({ explorer, drawerOpen, onDrawerOpen, onD
   const pendingProgressRef = useRef<number | null>(null);
   const settleTimerRef = useRef<number | null>(null);
 
-  useEffect(() => {
+  // Keep the reading surface at its exact visual position before the drawer's
+  // first painted frame. useEffect lets the fixed-body scroll lock flash once.
+  useLayoutEffect(() => {
     if (!drawerOpen || !showMobileMenu) return;
 
     const mobileViewport = window.matchMedia('(max-width: 720px)');
