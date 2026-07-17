@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { LoaderCircle } from 'lucide-react';
-import type { NoteSummary } from './api';
+import { authApi, authExpiredEvent, type AuthSession, type NoteSummary } from './api';
 import { useWorkspaceController } from './app/useWorkspaceController';
 import { navigate, panelForRoute, pathForPanel, useAppRoute } from './app/routes';
 import type { Panel } from './app/types';
@@ -10,7 +10,7 @@ import type { ExplorerTool } from './components/layout/ExplorerTools';
 import { ArticleActionSheet, ArticleToolbar, DocumentView } from './features/reader/ReaderViews';
 import RepositorySettings from './features/settings/RepositorySettings';
 import SyncPanel from './features/sync/SyncPanel';
-import { ConnectGitHub, InitializationProgress, RepositoryPicker, SetupScreen } from './features/setup/SetupScreens';
+import { AccessDenied, ConnectGitHub, GitHubLogin, InitializationProgress, RepositoryPicker, SetupScreen } from './features/setup/SetupScreens';
 import { isMarkdown } from './lib/files';
 
 const ArticleEditor = lazy(() => import('./features/reader/ArticleEditor'));
@@ -18,11 +18,38 @@ const ArticleEditor = lazy(() => import('./features/reader/ArticleEditor'));
 export default function App() {
   const route = useAppRoute();
   const panel = panelForRoute(route.pathname);
-  const workspace = useWorkspaceController();
+  const [session, setSession] = useState<AuthSession | null>(null);
+  const [sessionLoading, setSessionLoading] = useState(true);
+  const [accessDenied, setAccessDenied] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const refreshSession = useCallback(async () => {
+    setSessionLoading(true);
+    try {
+      const next = await authApi.session();
+      setSession(next);
+      if (next.authenticated) setAccessDenied(false);
+    } catch {
+      setSession({ authenticated: false, user: null });
+      setAuthError('无法读取登录状态，请检查服务连接。');
+    } finally {
+      setSessionLoading(false);
+    }
+  }, []);
+  const workspace = useWorkspaceController(session?.authenticated === true);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [openExplorerOnReturn, setOpenExplorerOnReturn] = useState(false);
   const [activeExplorerTool, setActiveExplorerTool] = useState<ExplorerTool | null>(null);
   const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    void refreshSession();
+  }, [refreshSession]);
+
+  useEffect(() => {
+    const refresh = () => { void refreshSession(); };
+    window.addEventListener(authExpiredEvent, refresh);
+    return () => window.removeEventListener(authExpiredEvent, refresh);
+  }, [refreshSession]);
 
   const navigateToPanel = useCallback((nextPanel: Panel) => {
     const nextPath = pathForPanel(nextPanel);
@@ -122,18 +149,32 @@ export default function App() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('github') === 'connected') {
+    const auth = params.get('auth');
+    const github = params.get('github');
+    if (auth === 'success') {
+      setAccessDenied(false);
+      setAuthError(null);
+      void refreshSession();
+    }
+    if (auth === 'forbidden') {
+      setSession({ authenticated: false, user: null });
+      setAccessDenied(true);
+      setAuthError(null);
+    }
+    if (auth === 'error') setAuthError(params.get('reason') || 'GitHub 登录没有完成。');
+    if (github === 'connected') {
       void workspace.reload(false);
       workspace.setNotice('GitHub 已连接，请选择要同步的笔记库。');
     }
-    if (params.get('github') === 'error') workspace.setError(params.get('reason') || 'GitHub 授权没有完成。');
-    if (params.has('github')) {
+    if (github === 'error') workspace.setError(params.get('reason') || 'GitHub 授权没有完成。');
+    if (params.has('auth') || params.has('github')) {
       const url = new URL(window.location.href);
+      url.searchParams.delete('auth');
       url.searchParams.delete('github');
       url.searchParams.delete('reason');
       window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
     }
-  }, [workspace.reload, workspace.setError, workspace.setNotice]);
+  }, [refreshSession, workspace.reload, workspace.setError, workspace.setNotice]);
 
   const closeError = useCallback(() => workspace.setError(null), [workspace.setError]);
   const closeNotice = useCallback(() => workspace.setNotice(null), [workspace.setNotice]);
@@ -141,8 +182,22 @@ export default function App() {
     ? <Toast key={`error:${workspace.error}`} kind="error" value={workspace.error} onClose={closeError} />
     : workspace.notice ? <Toast key={`notice:${workspace.notice}`} kind="notice" value={workspace.notice} onClose={closeNotice} /> : null;
 
+  const retryLogin = useCallback(async () => {
+    setAccessDenied(false);
+    setAuthError(null);
+    try {
+      const authorization = await authApi.startGitHubLogin();
+      window.location.href = authorization.url;
+    } catch {
+      setAuthError('无法启动 GitHub 登录，请检查服务连接。');
+    }
+  }, []);
+
+  if (sessionLoading) return <SetupScreen><LoaderCircle className="spin" size={21} />正在读取登录状态</SetupScreen>;
+  if (accessDenied) return <SetupScreen><AccessDenied onRetry={() => void retryLogin()} /></SetupScreen>;
+  if (!session?.authenticated) return <SetupScreen><GitHubLogin error={authError} /></SetupScreen>;
   if (workspace.loading && !workspace.auth) return <SetupScreen><LoaderCircle className="spin" size={21} />正在读取本地设置</SetupScreen>;
-  if (!workspace.auth?.authenticated) return <SetupScreen feedback={feedback}><ConnectGitHub error={workspace.error} /></SetupScreen>;
+  if (!workspace.auth?.connected) return <SetupScreen feedback={feedback}><ConnectGitHub error={workspace.error} /></SetupScreen>;
   if (!workspace.repository) return <SetupScreen feedback={feedback}><RepositoryPicker login={workspace.auth.login} onSelect={workspace.chooseRepository} /></SetupScreen>;
   if (workspace.sync?.state === 'checking' && workspace.sync && !workspace.files.length) return <SetupScreen feedback={feedback}><InitializationProgress sync={workspace.sync} onRetry={workspace.runSync} /></SetupScreen>;
 

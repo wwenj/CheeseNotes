@@ -17,11 +17,16 @@ import type { NoteRow, SyncPhase, SyncState, WorkspaceRow } from './contracts/sy
 type RemoteSnapshot = { head: string; treeSha: string; entries: Map<string, TreeEntry> };
 type Claim = Pick<NoteRow, 'id' | 'path' | 'remote_path' | 'content' | 'revision' | 'deleted'>;
 const retryDelays = [5_000, 15_000, 30_000, 60_000, 300_000];
+const quietSyncDelay = 10 * 60_000;
 
 @Injectable()
 export class SyncService implements OnModuleInit {
   private active: Promise<void> | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  private quietTimer: ReturnType<typeof setTimeout> | null = null;
+  private forceRequested = false;
+  private deferredRequested = false;
+  private activeForced = false;
 
   constructor(
     @Inject(DatabaseService) private readonly database: DatabaseService,
@@ -35,7 +40,6 @@ export class SyncService implements OnModuleInit {
 
   onModuleInit() {
     void this.bootstrap();
-    setInterval(() => this.triggerSync(), 60_000);
   }
 
   status() {
@@ -61,7 +65,11 @@ export class SyncService implements OnModuleInit {
 
   schedule() {
     this.setWorkspace({ state: 'pending', phase: 'idle', last_error: '', next_retry_at: '' });
-    void this.triggerSync();
+    if (this.activeForced || this.forceRequested) {
+      this.forceRequested = true;
+      return;
+    }
+    this.scheduleQuietSync();
   }
 
   // 兼容旧调用方；写入已由 NoteService 的 SQLite 事务完成。
@@ -71,6 +79,13 @@ export class SyncService implements OnModuleInit {
   reset() { return this.triggerSync(); }
 
   triggerSync() {
+    this.forceRequested = true;
+    this.clearQuietTimer();
+    this.clearRetryTimer();
+    return this.startSync();
+  }
+
+  private startSync() {
     if (!this.repository.get()) {
       this.setWorkspace({ state: 'unconfigured', phase: 'idle' });
       return this.status();
@@ -79,11 +94,26 @@ export class SyncService implements OnModuleInit {
       this.setWorkspace({ state: 'unauthorized', phase: 'idle' });
       return this.status();
     }
-    if (!this.active) this.active = this.run().finally(() => { this.active = null; });
+    if (this.active) return this.status();
+    const forced = this.forceRequested;
+    this.forceRequested = false;
+    this.deferredRequested = false;
+    if (forced) this.clearQuietTimer();
+    this.activeForced = forced;
+    this.active = this.run(forced).finally(() => {
+      this.active = null;
+      this.activeForced = false;
+      if (this.forceRequested || this.deferredRequested) void this.startSync();
+    });
     return this.status();
   }
 
   async clearWorkspace() {
+    this.clearQuietTimer();
+    this.clearRetryTimer();
+    this.forceRequested = false;
+    this.deferredRequested = false;
+    this.activeForced = false;
     await this.active;
     await this.files.clear();
     this.database.db.transaction(() => {
@@ -173,9 +203,13 @@ export class SyncService implements OnModuleInit {
     mark();
   }
 
-  private async run() {
+  private async run(forced: boolean) {
     const token = randomUUID();
-    if (!this.acquireLock(token)) return;
+    if (!this.acquireLock(token)) {
+      if (forced) this.forceRequested = true;
+      this.requestRetry(500);
+      return;
+    }
     try {
       const { fullName, branch } = await this.remote();
       this.setWorkspace({ state: 'checking', phase: 'fetching', last_error: '', next_retry_at: '' });
@@ -195,7 +229,7 @@ export class SyncService implements OnModuleInit {
         await this.verifyAndAcknowledge(fullName, remote, claims);
         await this.reconcileRemote(fullName, remote);
       }
-      this.finish(remote.head);
+      this.finish(remote.head, forced);
     } catch (error) {
       this.fail(error);
     } finally {
@@ -223,9 +257,16 @@ export class SyncService implements OnModuleInit {
     this.setWorkspace({ phase: 'merging' });
     const local = this.database.db.prepare('SELECT * FROM notes').all() as NoteRow[];
     const byRemote = new Map(local.filter((note) => note.remote_path).map((note) => [note.remote_path!, note]));
+    const localCreates = new Map(local.filter((note) => note.dirty && !note.deleted && !note.remote_path).map((note) => [note.path, note]));
     for (const [path, entry] of remote.entries) {
       const note = byRemote.get(path);
       if (!note) {
+        const localCreate = localCreates.get(path);
+        if (localCreate) {
+          const content = isText(path) ? (await this.github.raw(fullName, path, remote.head)).toString('utf8') : null;
+          this.makeConflict(localCreate, content, entry.sha, remote.head);
+          continue;
+        }
         const content = isText(path) ? (await this.github.raw(fullName, path, remote.head)).toString('utf8') : null;
         this.database.db.prepare('INSERT OR IGNORE INTO notes(path,revision,updated_at,remote_sha,title,id,content,remote_path,base_content,dirty,deleted) VALUES(?,?,?,?,?,?,?,?,?,?,0)').run(path, hash(content ?? path), now(), entry.sha, noteTitle(path, content ?? ''), randomUUID(), content, path, content, 0);
         continue;
@@ -244,10 +285,12 @@ export class SyncService implements OnModuleInit {
 
   private makeConflict(note: NoteRow, remoteContent: string | null, remoteSha: string, remoteHead: string) {
     const copyPath = this.conflictPath(note.path, this.workspace().device_id, note.revision);
+    const remotePath = note.remote_path ?? note.path;
+    const operation = note.remote_path ? 'update' : 'create';
     const transaction = this.database.db.transaction(() => {
-      this.database.db.prepare('INSERT OR IGNORE INTO conflicts(id,path,base_content,local_content,remote_content,remote_commit,created_at,operation,resolution_copy_path) VALUES(?,?,?,?,?,?,?,?,?)').run(randomUUID(), note.path, note.base_content, note.content, remoteContent, remoteHead, now(), 'update', copyPath);
+      this.database.db.prepare('INSERT OR IGNORE INTO conflicts(id,path,base_content,local_content,remote_content,remote_commit,created_at,operation,resolution_copy_path) VALUES(?,?,?,?,?,?,?,?,?)').run(randomUUID(), note.path, note.base_content, note.content, remoteContent, remoteHead, now(), operation, copyPath);
       if (remoteContent === null) this.database.db.prepare('UPDATE notes SET deleted=1,dirty=0,updated_at=? WHERE id=?').run(now(), note.id);
-      else this.database.db.prepare('UPDATE notes SET path=remote_path,content=?,revision=?,base_content=?,remote_sha=?,dirty=0,deleted=0,title=?,updated_at=? WHERE id=?').run(remoteContent, hash(remoteContent), remoteContent, remoteSha, noteTitle(note.remote_path ?? note.path, remoteContent), now(), note.id);
+      else this.database.db.prepare('UPDATE notes SET path=?,content=?,revision=?,remote_path=?,base_content=?,remote_sha=?,dirty=0,deleted=0,title=?,updated_at=? WHERE id=?').run(remotePath, remoteContent, hash(remoteContent), remotePath, remoteContent, remoteSha, noteTitle(remotePath, remoteContent), now(), note.id);
       this.database.db.prepare('INSERT OR IGNORE INTO notes(path,revision,updated_at,remote_sha,title,id,content,remote_path,base_content,dirty,deleted) VALUES(?,?,?,?,?,?,?,?,?,?,0)').run(copyPath, note.revision, now(), null, noteTitle(copyPath, note.content ?? ''), randomUUID(), note.content, null, null, 1);
       this.bumpGeneration();
     });
@@ -272,36 +315,41 @@ export class SyncService implements OnModuleInit {
   }
 
   private async verifyAndAcknowledge(fullName: string, remote: RemoteSnapshot, claims: Claim[]) {
-    const verified = new Map<string, string>();
+    const verified = new Map<string, { sha: string; content: string }>();
     for (const claim of claims) {
       const entry = remote.entries.get(claim.path);
       if (claim.deleted) {
         if (claim.remote_path && remote.entries.has(claim.remote_path)) continue;
-        verified.set(claim.id, '');
+        verified.set(claim.id, { sha: '', content: '' });
       } else if (entry) {
         const remoteContent = (await this.github.raw(fullName, claim.path, remote.head)).toString('utf8');
-        if (hash(remoteContent) === claim.revision) verified.set(claim.id, entry.sha);
+        if (hash(remoteContent) === claim.revision) verified.set(claim.id, { sha: entry.sha, content: remoteContent });
       }
     }
     const acknowledge = this.database.db.transaction(() => {
       for (const claim of claims) {
         if (!verified.has(claim.id)) continue;
         if (claim.deleted) this.database.db.prepare('DELETE FROM notes WHERE id=? AND revision=? AND dirty=1 AND deleted=1').run(claim.id, claim.revision);
-        else this.database.db.prepare('UPDATE notes SET dirty=0,remote_path=path,remote_sha=?,base_content=content,updated_at=? WHERE id=? AND revision=? AND dirty=1').run(verified.get(claim.id), now(), claim.id, claim.revision);
+        else {
+          const acknowledged = verified.get(claim.id)!;
+          const clean = this.database.db.prepare('UPDATE notes SET dirty=0,remote_path=path,remote_sha=?,base_content=content,updated_at=? WHERE id=? AND revision=? AND dirty=1 AND deleted=0').run(acknowledged.sha, now(), claim.id, claim.revision);
+          if (!clean.changes) this.database.db.prepare('UPDATE notes SET remote_path=?,remote_sha=?,base_content=?,updated_at=? WHERE id=? AND revision<>? AND dirty=1 AND deleted=0').run(claim.path, acknowledged.sha, acknowledged.content, now(), claim.id, claim.revision);
+        }
       }
     });
     acknowledge();
   }
 
-  private finish(head: string) {
+  private finish(head: string, forced: boolean) {
     const dirty = this.countDirty();
     const conflicts = this.countConflicts();
     const workspace = this.workspace();
-    if (dirty) {
-      this.setWorkspace({ state: conflicts ? 'conflict' : 'pending', phase: 'idle', last_remote_head: head });
-      this.requestRetry(0);
+    if (conflicts) this.setWorkspace({ state: 'conflict', phase: 'completed', last_remote_head: head });
+    else if (dirty) {
+      this.setWorkspace({ state: 'pending', phase: 'idle', last_remote_head: head });
+      if (forced) this.forceRequested = true;
+      else this.ensureQuietSync();
     }
-    else if (conflicts) this.setWorkspace({ state: 'conflict', phase: 'completed', last_remote_head: head });
     else this.setWorkspace({ state: 'verified', phase: 'completed', last_remote_head: head, verified_remote_head: head, verified_generation: workspace.generation, verified_at: now(), last_error: '', next_retry_at: '' });
   }
 
@@ -316,11 +364,37 @@ export class SyncService implements OnModuleInit {
   }
 
   private requestRetry(delay: number) {
-    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.clearRetryTimer();
     this.retryTimer = setTimeout(() => {
       this.retryTimer = null;
-      void this.triggerSync();
+      this.deferredRequested = true;
+      void this.startSync();
     }, delay);
+  }
+
+  private scheduleQuietSync() {
+    this.clearQuietTimer();
+    this.quietTimer = setTimeout(() => {
+      this.quietTimer = null;
+      this.deferredRequested = true;
+      void this.startSync();
+    }, quietSyncDelay);
+  }
+
+  private ensureQuietSync() {
+    if (!this.quietTimer && !this.deferredRequested) this.scheduleQuietSync();
+  }
+
+  private clearQuietTimer() {
+    if (!this.quietTimer) return;
+    clearTimeout(this.quietTimer);
+    this.quietTimer = null;
+  }
+
+  private clearRetryTimer() {
+    if (!this.retryTimer) return;
+    clearTimeout(this.retryTimer);
+    this.retryTimer = null;
   }
 
   private applyDecision(row: Record<string, string | null>) {

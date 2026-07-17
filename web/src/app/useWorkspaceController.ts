@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { githubApi, notesApi, settingsApi, syncApi, type GitHubAuth, type Note, type NoteSummary, type SyncStatus } from '../api';
+import { githubApi, notesApi, settingsApi, syncApi, type GitHubConnection, type Note, type NoteSummary, type SyncStatus } from '../api';
 import { ApiError, apiUrl } from '../api/http';
 import type { ArticleMode, ClientSettings, Draft } from './types';
 import { clampReaderFontSize, clientSettingsKey, isSyncBusy, lastArticleKey, loadClientSettings, messageOf, newNotePath } from './constants';
@@ -17,10 +17,11 @@ type ClientWriteState = 'idle' | 'pending' | 'failed';
 
 const syncPollInterval = 500;
 const syncTimeout = 90_000;
+const autoSyncInterval = 15 * 60_000;
 const pause = (milliseconds: number) => new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
 
-export function useWorkspaceController() {
-  const [auth, setAuth] = useState<GitHubAuth | null>(null);
+export function useWorkspaceController(enabled = true) {
+  const [auth, setAuth] = useState<GitHubConnection | null>(null);
   const [repository, setRepository] = useState<string | null>(null);
   const [files, setFiles] = useState<NoteSummary[]>([]);
   const [folders, setFolders] = useState<string[]>([]);
@@ -43,9 +44,12 @@ export function useWorkspaceController() {
   const loadSequence = useRef(0);
   const loadAbort = useRef<AbortController | null>(null);
   const autosaveRef = useRef<AutoSaveQueue | null>(null);
+  const autoSyncRepositoryRef = useRef<string | null>(null);
+  const runSyncRef = useRef<(options?: { automatic?: boolean }) => Promise<void>>(() => Promise.resolve());
 
   if (!autosaveRef.current) {
     autosaveRef.current = new AutoSaveQueue({
+      delay: 5_000,
       // 草稿只在当前编辑会话内存活，不能成为长期同步数据源。
       persist: async () => undefined,
       clear: async () => undefined,
@@ -203,14 +207,15 @@ export function useWorkspaceController() {
   }, [autosave, reveal]);
 
   const reload = useCallback(async (withLoading = true, options: ReloadOptions = {}) => {
+    if (!enabled) return;
     if (withLoading) setLoading(true);
     try {
-      const [nextAuth, config, nextSync] = await Promise.all([githubApi.auth(), settingsApi.repository(), syncApi.status()]);
+      const [nextAuth, config, nextSync] = await Promise.all([githubApi.connection(), settingsApi.repository(), syncApi.status()]);
       setAuth(nextAuth);
       setRepository(config.repository || null);
       repositoryRef.current = config.repository || null;
       setSync(nextSync);
-      if (!config.repository) {
+      if (!nextAuth.connected || !config.repository) {
         setFiles([]);
         setFolders([]);
         setError(null);
@@ -248,14 +253,31 @@ export function useWorkspaceController() {
     } finally {
       if (withLoading) setLoading(false);
     }
-  }, [loadFile]);
+  }, [enabled, loadFile]);
 
   useEffect(() => {
-    void reload();
-  }, [reload]);
+    if (enabled) void reload();
+  }, [enabled, reload]);
 
   useEffect(() => {
-    if (!isSyncBusy(sync)) return;
+    if (enabled) return;
+    loadAbort.current?.abort();
+    setAuth(null);
+    setRepository(null);
+    repositoryRef.current = null;
+    setFiles([]);
+    setFolders([]);
+    setSelected(null);
+    selectedRef.current = null;
+    setNote(null);
+    setDraft(null);
+    setSync(null);
+    setLoading(false);
+    setLoadingFile(false);
+  }, [enabled]);
+
+  useEffect(() => {
+    if (!enabled || !isSyncBusy(sync)) return;
     const timer = window.setInterval(() => {
       void syncApi.status().then(async (next) => {
         setSync(next);
@@ -263,23 +285,7 @@ export function useWorkspaceController() {
       }).catch((reason) => setError(messageOf(reason)));
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [draft, reload, sync?.state]);
-
-  useEffect(() => {
-    const refreshRemote = () => {
-      if (document.visibilityState !== 'visible') return;
-      void syncApi.run().then(async (next) => {
-        setSync(next);
-        if (!isSyncBusy(next)) await reload(false, { preserveCurrentDocument: Boolean(draft), forceTreeRefresh: true });
-      }).catch((reason) => setError(messageOf(reason)));
-    };
-    const timer = window.setInterval(refreshRemote, 60_000);
-    document.addEventListener('visibilitychange', refreshRemote);
-    return () => {
-      window.clearInterval(timer);
-      document.removeEventListener('visibilitychange', refreshRemote);
-    };
-  }, [draft, reload]);
+  }, [draft, enabled, reload, sync?.state]);
 
   const updateDraftContent = useCallback((content: string) => {
     setDraft((current) => {
@@ -413,7 +419,7 @@ export function useWorkspaceController() {
     setSheetOpen(false);
   }, [autosave, draft]);
 
-  const runSync = useCallback(async () => {
+  const runSync = useCallback(async (options: { automatic?: boolean } = {}) => {
     try {
       const current = selectedRef.current;
       const currentRepository = repositoryRef.current;
@@ -442,12 +448,31 @@ export function useWorkspaceController() {
 
       await reload(false, { preserveCurrentDocument: false, forceTreeRefresh: true });
       setClientWriteState('idle');
-      setNotice('已验证同步：当前端、服务端与 GitHub 一致。');
+      if (!options.automatic) setNotice('已验证同步：当前端、服务端与 GitHub 一致。');
     } catch (reason) {
       setClientWriteState((current) => current === 'idle' ? current : 'failed');
       setError(reason instanceof Error ? reason.message : messageOf(reason));
     }
   }, [autosave, draft, reload]);
+
+  useEffect(() => {
+    runSyncRef.current = runSync;
+  }, [runSync]);
+
+  useEffect(() => {
+    if (!enabled || !auth?.connected || !repository) {
+      autoSyncRepositoryRef.current = null;
+      return;
+    }
+    if (loading) return;
+    const firstOpen = autoSyncRepositoryRef.current !== repository;
+    if (firstOpen) {
+      autoSyncRepositoryRef.current = repository;
+      void runSyncRef.current({ automatic: true });
+    }
+    const timer = window.setInterval(() => void runSyncRef.current({ automatic: true }), autoSyncInterval);
+    return () => window.clearInterval(timer);
+  }, [auth?.connected, enabled, loading, repository]);
 
   const chooseRepository = useCallback(async (value: string) => {
     const previousRepository = repositoryRef.current;

@@ -1,7 +1,8 @@
 import 'reflect-metadata';
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import { FastifyAdapter } from '@nestjs/platform-fastify';
+import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
+import cookie from '@fastify/cookie';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { existsSync, promises as fs } from 'node:fs';
 import { extname, resolve } from 'node:path';
@@ -22,14 +23,15 @@ const assetContentTypes: Record<string, string> = {
 };
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, new FastifyAdapter({ logger: true }), { rawBody: true });
+  const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter({ logger: true }), { rawBody: true });
+  await app.register(cookie);
   app.setGlobalPrefix('api');
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true }));
   const config = runtimeConfig();
   if (config.corsOrigins.length) {
     app.enableCors({
       origin: config.corsOrigins,
-      credentials: false,
+      credentials: true,
       methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     });
   }

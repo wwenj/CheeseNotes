@@ -1,4 +1,4 @@
-import { ApiError, apiUrl, request } from './http';
+import { ApiError, apiUrl, notifyAuthExpired, request } from './http';
 
 export type NoteSummary = { id?: string; path: string; title?: string; revision?: string; assetVersion?: string; updated_at?: string };
 export type Note = { id?: string; path: string; content: string; revision: string };
@@ -11,13 +11,14 @@ async function tree(etag?: string, signal?: AbortSignal, force = false): Promise
   if (etag) headers.set('If-None-Match', etag);
   let response: Response;
   try {
-    response = await fetch(apiUrl('tree?includeFolders=1'), { headers, signal, ...(force ? { cache: 'no-store' } : {}) });
+    response = await fetch(apiUrl('tree?includeFolders=1'), { headers, signal, credentials: 'include', ...(force ? { cache: 'no-store' } : {}) });
   } catch (reason) {
     if (reason instanceof DOMException && reason.name === 'AbortError') throw reason;
     throw new ApiError('无法连接服务，请检查服务地址。');
   }
   if (response.status === 304) return { files: null, folders: null, etag: response.headers.get('etag') ?? etag ?? null };
   if (!response.ok) {
+    notifyAuthExpired(response.status);
     const result = await response.json().catch(() => null) as { message?: string | string[] } | null;
     const message = Array.isArray(result?.message) ? result.message.join('；') : result?.message;
     throw new ApiError(message || `请求失败（${response.status}）`, response.status);

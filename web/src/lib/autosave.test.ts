@@ -25,7 +25,9 @@ describe('AutoSaveQueue', () => {
 
     queue.update({ ...baseDraft(), content: '第一版' });
     queue.update({ ...baseDraft(), content: '最终版' });
-    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(save).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
 
     expect(save).toHaveBeenCalledTimes(1);
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ content: '最终版', revision: 'r0' }));
@@ -43,10 +45,10 @@ describe('AutoSaveQueue', () => {
     queue.ensure(baseDraft());
 
     queue.update({ ...baseDraft(), content: '第一版' });
-    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(5_000);
     queue.update({ ...baseDraft(), content: '第二版' });
     finishFirst?.({ kind: 'saved', revision: 'r1' });
-    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(5_000);
 
     expect(save).toHaveBeenCalledTimes(2);
     expect(save.mock.calls[0][0]).toMatchObject({ content: '第一版', revision: 'r0' });
@@ -64,7 +66,7 @@ describe('AutoSaveQueue', () => {
     queue.ensure(baseDraft());
 
     queue.update({ ...baseDraft(), content: '第一版' });
-    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(5_000);
     queue.update({ ...baseDraft(), content: '第二版' });
     finishFirst?.({ kind: 'saved', revision: 'r1' });
     await vi.advanceTimersByTimeAsync(0);
@@ -72,7 +74,7 @@ describe('AutoSaveQueue', () => {
     expect(saved.mock.calls[0][2]).toBe(false);
   });
 
-  it('立即 flush 可保存空正文，不等待 500ms', async () => {
+  it('立即 flush 可保存空正文，不等待 5 秒', async () => {
     vi.useFakeTimers();
     const save = vi.fn().mockResolvedValue({ kind: 'saved', revision: 'r1' } as const);
     const queue = new AutoSaveQueue({ persist: vi.fn().mockResolvedValue(undefined), clear: vi.fn().mockResolvedValue(undefined), save, onSaved: vi.fn(), onRetrying: vi.fn(), onBlocked: vi.fn() });
@@ -105,7 +107,7 @@ describe('AutoSaveQueue', () => {
     queue.ensure(baseDraft());
 
     queue.update({ ...baseDraft(), content: '离线内容' });
-    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(5_000);
     expect(clear).not.toHaveBeenCalled();
     expect(persist).toHaveBeenCalledWith(expect.objectContaining({ content: '离线内容' }));
 
@@ -123,7 +125,7 @@ describe('AutoSaveQueue', () => {
     queue.ensure(baseDraft());
 
     queue.update({ ...baseDraft(), content: '本机版本' });
-    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(5_000);
 
     expect(save).toHaveBeenCalledTimes(1);
     expect(blocked).toHaveBeenCalledTimes(1);

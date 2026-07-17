@@ -46,7 +46,7 @@ export class AutoSaveQueue {
   private readonly retryDelays: number[];
 
   constructor(private readonly options: AutoSaveQueueOptions) {
-    this.delay = options.delay ?? 500;
+    this.delay = options.delay ?? 5_000;
     this.retryDelays = options.retryDelays ?? [1_000, 2_000, 5_000, 10_000, 30_000];
   }
 

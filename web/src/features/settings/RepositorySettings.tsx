@@ -1,13 +1,13 @@
 import { useRef, useState, type TouchEvent } from 'react';
 import { ArrowLeft, ChevronRight, CircleHelp, Github, Info, SlidersHorizontal, Type, X } from 'lucide-react';
-import type { GitHubAuth } from '../../api';
+import type { GitHubConnection } from '../../api';
 import { defaultClientSettings } from '../../app/constants';
 
 type SettingsPage = 'menu' | 'reader' | 'repository' | 'about';
 
 type RepositorySettingsProps = {
   repository: string;
-  auth: GitHubAuth;
+  auth: GitHubConnection;
   readerFontSize: number;
   onReaderFontSizeChange: (value: number) => void;
   onClearReadingCache: () => Promise<void>;

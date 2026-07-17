@@ -6,6 +6,7 @@ type GitHubOAuthSettings = {
   clientSecret: string;
   authorizationCallbackUrl: string;
   homepageUrl: string;
+  sessionCookieDomain?: string;
 };
 
 type GitHubOAuthSettingsFile = Record<'development' | 'production', GitHubOAuthSettings>;
@@ -20,6 +21,7 @@ export type RuntimeConfig = {
   githubOAuthClientSecret: string;
   githubOAuthCallbackUrl: string;
   corsOrigins: string[];
+  sessionCookieDomain?: string;
 };
 
 const githubOAuthConfigPath = () => resolve(process.cwd(), 'config', 'github-oauth.local.json');
@@ -41,6 +43,22 @@ const httpUrl = (value: string, key: keyof GitHubOAuthSettings, environment: str
   return url.href.replace(/\/$/, '');
 };
 
+const sessionCookieDomain = (value: string | undefined, callbackUrl: string, homepageUrl: string, environment: string) => {
+  if (!value?.trim()) return undefined;
+  const domain = value.trim().replace(/^\./, '').toLowerCase();
+  if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/.test(domain)) {
+    throw new Error(`GitHub OAuth ${environment} 配置中的 sessionCookieDomain 必须是根域名，例如 wwenj.com。`);
+  }
+  const covers = (url: string) => {
+    const hostname = new URL(url).hostname.toLowerCase();
+    return hostname === domain || hostname.endsWith(`.${domain}`);
+  };
+  if (!covers(callbackUrl) || !covers(homepageUrl)) {
+    throw new Error(`GitHub OAuth ${environment} 的 sessionCookieDomain 必须同时覆盖授权回调地址和首页地址。`);
+  }
+  return domain;
+};
+
 const githubOAuthSettings = (): GitHubOAuthSettings => {
   const environment = process.env.NODE_ENV === 'production' ? 'production' : 'development';
   const path = githubOAuthConfigPath();
@@ -56,18 +74,21 @@ const githubOAuthSettings = (): GitHubOAuthSettings => {
 
   const settings = file[environment];
   if (!settings) throw new Error(`GitHub OAuth 本地配置缺少 ${environment} 环境。`);
+  const authorizationCallbackUrl = httpUrl(requiredSetting(settings, 'authorizationCallbackUrl', environment), 'authorizationCallbackUrl', environment);
+  const homepageUrl = httpUrl(requiredSetting(settings, 'homepageUrl', environment), 'homepageUrl', environment);
   return {
     clientId: requiredSetting(settings, 'clientId', environment),
     clientSecret: requiredSetting(settings, 'clientSecret', environment),
-    authorizationCallbackUrl: httpUrl(requiredSetting(settings, 'authorizationCallbackUrl', environment), 'authorizationCallbackUrl', environment),
-    homepageUrl: httpUrl(requiredSetting(settings, 'homepageUrl', environment), 'homepageUrl', environment),
+    authorizationCallbackUrl,
+    homepageUrl,
+    sessionCookieDomain: sessionCookieDomain(settings.sessionCookieDomain, authorizationCallbackUrl, homepageUrl, environment),
   };
 };
 
 export const runtimeConfig = (): RuntimeConfig => {
   const oauth = githubOAuthSettings();
   const corsOriginSetting = process.env.CORS_ORIGINS ?? 'capacitor://localhost';
-  const corsOrigins = corsOriginSetting.split(',').map((value) => value.trim()).filter(Boolean);
+  const corsOrigins = [...new Set([new URL(oauth.homepageUrl).origin, ...corsOriginSetting.split(',').map((value) => value.trim()).filter(Boolean)])];
   return {
     dataRoot: existsSync('/.dockerenv') ? '/var/lib/note-service' : resolve(process.cwd(), '..', '.runtime'),
     serviceDir: 'note-service',
@@ -78,5 +99,6 @@ export const runtimeConfig = (): RuntimeConfig => {
     githubOAuthClientSecret: oauth.clientSecret,
     githubOAuthCallbackUrl: oauth.authorizationCallbackUrl,
     corsOrigins,
+    sessionCookieDomain: oauth.sessionCookieDomain,
   };
 };

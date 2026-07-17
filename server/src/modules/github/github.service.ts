@@ -5,6 +5,13 @@ import { wait } from '../../common/time.js';
 import { DatabaseService } from '../database/database.service.js';
 import type { RepoMeta, TreeEntry } from './contracts/github.types.js';
 
+export type GitHubAccount = {
+  id: string;
+  login: string;
+  avatarUrl: string | null;
+  emails: Array<{ email: string; verified: boolean }>;
+};
+
 export class GitHubError extends Error {
   constructor(readonly status: number, message: string) {
     super(message);
@@ -16,21 +23,31 @@ export class GitHubService {
   constructor(@Inject(DatabaseService) private readonly database: DatabaseService) {}
 
   hasToken() {
-    return Boolean(getSetting(this.database.db, 'github_access_token'));
+    return Boolean(getSetting(this.database.db, 'github_access_token') && this.accountId());
   }
 
   login() {
     return getSetting(this.database.db, 'github_login');
   }
 
+  accountId() {
+    return getSetting(this.database.db, 'github_account_id');
+  }
+
+  hasConnectionFor(githubId: string) {
+    return this.hasToken() && this.accountId() === githubId;
+  }
+
   clearToken() {
     setSetting(this.database.db, 'github_access_token', '');
     setSetting(this.database.db, 'github_login', '');
+    setSetting(this.database.db, 'github_account_id', '');
   }
 
-  saveToken(token: string, login: string) {
+  saveToken(token: string, account: Pick<GitHubAccount, 'id' | 'login'>) {
     setSetting(this.database.db, 'github_access_token', token);
-    setSetting(this.database.db, 'github_login', login);
+    setSetting(this.database.db, 'github_login', account.login);
+    setSetting(this.database.db, 'github_account_id', account.id);
   }
 
   async user() {
@@ -128,11 +145,14 @@ export class GitHubService {
     await this.json(`/repos/${fullName}/contents/${safePath}`, { method: 'DELETE', body: JSON.stringify({ message: `note-service: delete ${path}`, branch, sha }) });
   }
 
-  async userForToken(token: string) {
+  async accountForToken(token: string, includeEmails = false): Promise<GitHubAccount> {
     const response = await fetch('https://api.github.com/user', { headers: this.headers(token) });
-    const payload = await response.json().catch(() => ({})) as { login?: string; message?: string };
-    if (!response.ok || !payload.login) throw new UnauthorizedException(payload.message || 'GitHub Token 无效');
-    return payload.login;
+    const payload = await response.json().catch(() => ({})) as { id?: number; login?: string; avatar_url?: string | null; message?: string };
+    if (!response.ok || !payload.login || !payload.id) throw new UnauthorizedException(payload.message || 'GitHub Token 无效');
+    const emails = includeEmails
+      ? await this.emailsForToken(token)
+      : [];
+    return { id: String(payload.id), login: payload.login, avatarUrl: payload.avatar_url ?? null, emails };
   }
 
   async exchange(clientId: string, clientSecret: string, code: string, verifier: string, redirectUri: string) {
@@ -148,12 +168,24 @@ export class GitHubService {
 
   private token() {
     const token = getSetting(this.database.db, 'github_access_token');
-    if (!token) throw new UnauthorizedException('请先连接 GitHub');
+    if (!token || !this.accountId()) throw new UnauthorizedException('请先连接 GitHub');
     return token;
   }
 
   private headers(token = this.token()) {
     return { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'note-service' };
+  }
+
+  private async emailsForToken(token: string) {
+    const response = await fetch('https://api.github.com/user/emails', { headers: this.headers(token) });
+    const payload = await response.json().catch(() => []) as Array<{ email?: string; verified?: boolean }> | { message?: string };
+    if (!response.ok || !Array.isArray(payload)) {
+      const message = Array.isArray(payload) ? '' : payload.message;
+      throw new UnauthorizedException(message || '无法读取 GitHub 已验证邮箱');
+    }
+    return payload
+      .filter((item): item is { email: string; verified: boolean } => typeof item.email === 'string' && typeof item.verified === 'boolean')
+      .map((item) => ({ email: item.email, verified: item.verified }));
   }
 
   private async request(path: string, init: RequestInit = {}) {

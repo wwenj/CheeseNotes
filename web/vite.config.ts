@@ -13,6 +13,8 @@ export default defineConfig(() => ({
     __NOTE_SERVICE_BASE_URL__: JSON.stringify(''),
   },
   server: {
+    host: '0.0.0.0',
+    allowedHosts: ['note.wwenj.com'],
     // 工作目录包含 `:`，Vite 7 会将 index.html 误判为 allow list 外的文件。
     // 仅开发服务器关闭严格检查；生产环境由 NestJS 直接托管构建产物。
     fs: { strict: false, allow: [noteServiceRoot] },

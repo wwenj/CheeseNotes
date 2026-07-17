@@ -32,7 +32,18 @@ export class DatabaseService {
       CREATE TABLE IF NOT EXISTS conflicts(id TEXT PRIMARY KEY, path TEXT, base_content TEXT, local_content TEXT, remote_content TEXT, remote_commit TEXT, created_at TEXT, operation TEXT, resolution_action TEXT, resolution_content TEXT, resolution_copy_path TEXT, resolution_updated_at TEXT);
       CREATE TABLE IF NOT EXISTS sync_runs(id INTEGER PRIMARY KEY AUTOINCREMENT, state TEXT, error TEXT, created_at TEXT);
       CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS oauth_web_states(state TEXT PRIMARY KEY, client_id TEXT NOT NULL, client_secret TEXT NOT NULL, verifier TEXT NOT NULL, created_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS users(
+        id TEXT PRIMARY KEY, github_id TEXT NOT NULL UNIQUE, github_login TEXT NOT NULL,
+        email TEXT NOT NULL, avatar_url TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
+        last_login_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS sessions_user_id_idx ON sessions(user_id);
+      CREATE TABLE IF NOT EXISTS oauth_web_states(
+        state TEXT PRIMARY KEY, client_id TEXT NOT NULL, client_secret TEXT NOT NULL,
+        verifier TEXT NOT NULL, purpose TEXT NOT NULL DEFAULT 'repository',
+        user_id TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS sync_jobs(id INTEGER PRIMARY KEY AUTOINCREMENT, state TEXT NOT NULL, phase TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS sync_workspace(
@@ -64,6 +75,14 @@ export class DatabaseService {
     ];
     for (const [name, type] of missingConflictColumns) {
       if (!conflictColumns.some((column) => column.name === name)) this.db.exec(`ALTER TABLE conflicts ADD COLUMN ${name} ${type}`);
+    }
+    const oauthStateColumns = this.db.prepare('PRAGMA table_info(oauth_web_states)').all() as Array<{ name: string }>;
+    const missingOAuthStateColumns: Array<[string, string]> = [
+      ['purpose', "TEXT NOT NULL DEFAULT 'repository'"],
+      ['user_id', "TEXT NOT NULL DEFAULT ''"],
+    ];
+    for (const [name, type] of missingOAuthStateColumns) {
+      if (!oauthStateColumns.some((column) => column.name === name)) this.db.exec(`ALTER TABLE oauth_web_states ADD COLUMN ${name} ${type}`);
     }
     this.db.prepare("INSERT OR IGNORE INTO sync_workspace(id,updated_at) VALUES(1,'')").run();
     this.db.prepare("UPDATE sync_workspace SET device_id=lower(hex(randomblob(8))) WHERE id=1 AND device_id=''").run();
