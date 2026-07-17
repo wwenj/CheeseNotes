@@ -14,6 +14,8 @@ GitHub OAuth 凭据仅保存在 `server/config/github-oauth.local.json`，该文
 
 服务端模块划分、依赖方向和接口契约见 [server/ARCHITECTURE.md](server/ARCHITECTURE.md)。
 
+作为开源项目的完整产品设计、前端体验、Markdown 读写、权限和 GitHub 双向同步说明见 [docs/PROJECT_OVERVIEW.md](docs/PROJECT_OVERVIEW.md)。
+
 ## Web 客户端
 
 ```bash
