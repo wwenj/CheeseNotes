@@ -26,6 +26,7 @@ pnpm-debug.log*
 !.env.example
 !.env.*.example
 server/config/github-oauth.local.json
+server/config/authenticator-secret.local.txt
 
 # Local application data and test data
 .runtime/

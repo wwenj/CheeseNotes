@@ -4,9 +4,10 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { runtimeConfig } from '../../config/runtime.config.js';
 import { RepositoryService } from '../settings/repository.service.js';
 import { SyncService } from '../sync/sync.service.js';
-import { currentUser, sessionTokenFromRequest } from './session.guard.js';
+import { sessionTokenFromRequest } from './session.guard.js';
 import { GitHubAccessDeniedError, OAuthService, type OAuthClient } from './oauth.service.js';
 import { Public } from './public.decorator.js';
+import { DevicePublic } from './device-public.decorator.js';
 
 class OAuthClientDto {
   @IsOptional()
@@ -35,26 +36,28 @@ export class AuthController {
     return this.oauth.beginLogin(body?.client ?? 'web');
   }
 
+  @Public()
   @Post('github/connect')
-  startRepositoryConnection(@Req() request: FastifyRequest, @Body() body?: OAuthClientDto) {
-    return this.oauth.beginRepositoryConnection(currentUser(request), body?.client ?? 'web');
+  startRepositoryConnection(@Body() body?: OAuthClientDto) {
+    return this.oauth.beginRepositoryConnection(body?.client ?? 'web');
   }
 
   @Public()
+  @DevicePublic()
   @Get('github/callback')
   async callback(
     @Query('code') code: string,
     @Query('state') state: string,
     @Query('error') error: string | undefined,
-    @Req() request: FastifyRequest,
     @Res() reply: FastifyReply,
   ) {
     const client = this.oauth.clientForState(state);
+    const purpose = this.oauth.purposeForState(state);
     const base = this.callbackBase(client);
-    if (error || !code || !state) return reply.code(302).redirect(this.redirect(base, 'auth', 'error', error || '授权被取消'));
+    const callbackKey = purpose === 'repository' ? 'github' : 'auth';
+    if (error || !code || !state) return reply.code(302).redirect(this.redirect(base, callbackKey, 'error', error || '授权被取消'));
     try {
-      const user = this.oauth.session(request.cookies?.[OAuthService.sessionCookieName]);
-      const result = await this.oauth.finishWeb(code, state, user?.id);
+      const result = await this.oauth.finishWeb(code, state);
       if (result.purpose === 'login') {
         if (result.client === 'ios') {
           return reply.code(302).redirect(this.redirect(base, 'auth', 'success', undefined, this.oauth.createMobileHandoff(result.user.id)));
@@ -69,7 +72,7 @@ export class AuthController {
       if (reason instanceof GitHubAccessDeniedError) return reply.code(302).redirect(this.redirect(base, 'auth', 'forbidden'));
       const message = reason instanceof Error ? reason.message : 'GitHub 授权失败';
       this.logger.warn(`GitHub OAuth callback failed: ${message}`);
-      return reply.code(302).redirect(this.redirect(base, 'auth', 'error', message));
+      return reply.code(302).redirect(this.redirect(base, callbackKey, 'error', message));
     }
   }
 
@@ -93,18 +96,19 @@ export class AuthController {
     return reply.send({ ok: true });
   }
 
+  @Public()
   @Get('github/status')
-  status(@Req() request: FastifyRequest) {
-    return this.oauth.connectionStatus(currentUser(request), this.repository.get());
+  status() {
+    return this.oauth.connectionStatus(this.repository.get());
   }
 
+  @Public()
   @Delete('github')
-  async disconnect(@Req() request: FastifyRequest) {
-    currentUser(request);
+  async disconnect() {
     await this.sync.clearWorkspace();
     this.repository.clear();
     this.oauth.disconnect();
-    return this.oauth.connectionStatus(currentUser(request), this.repository.get());
+    return this.oauth.connectionStatus(this.repository.get());
   }
 
   private callbackBase(client: OAuthClient) {

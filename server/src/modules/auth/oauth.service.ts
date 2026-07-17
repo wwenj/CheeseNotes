@@ -13,7 +13,6 @@ const SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60_000;
 type OAuthPurpose = 'login' | 'repository';
 export type OAuthClient = 'web' | 'ios';
 type OAuthState = { verifier: string; purpose: OAuthPurpose; client: OAuthClient; userId: string; createdAt: string };
-type StoredUser = SessionUser & { githubId: string };
 
 export type SessionUser = {
   id: string;
@@ -47,16 +46,13 @@ export class OAuthService {
     return this.begin('login', client);
   }
 
-  beginRepositoryConnection(user: SessionUser, client: OAuthClient = 'web') {
-    return this.begin('repository', client, user.id);
+  beginRepositoryConnection(client: OAuthClient = 'web') {
+    return this.begin('repository', client);
   }
 
-  async finishWeb(code: string, state: string, currentUserId?: string): Promise<OAuthResult> {
+  async finishWeb(code: string, state: string): Promise<OAuthResult> {
     const row = this.consumeState(state);
     const config = runtimeConfig();
-    if (row.purpose === 'repository' && row.client === 'web' && (!currentUserId || currentUserId !== row.userId)) {
-      throw new BadRequestException('登录状态已失效，请重新登录后连接 GitHub');
-    }
 
     const token = await this.github.exchange(config.githubOAuthClientId, config.githubOAuthClientSecret, code, row.verifier, config.githubOAuthCallbackUrl);
     if (row.purpose === 'login') {
@@ -68,8 +64,6 @@ export class OAuthService {
     }
 
     const account = await this.github.accountForToken(token);
-    const owner = this.userById(row.userId);
-    if (!owner || owner.githubId !== account.id) throw new BadRequestException('当前 GitHub 账号与登录账号不一致，请重新连接');
     this.github.saveToken(token, account);
     return { purpose: 'repository', client: row.client, login: account.login };
   }
@@ -78,6 +72,12 @@ export class OAuthService {
     if (!state) return 'web';
     const row = this.database.db.prepare('SELECT client FROM oauth_web_states WHERE state=?').get(state) as { client?: string } | undefined;
     return row?.client === 'ios' ? 'ios' : 'web';
+  }
+
+  purposeForState(state: string | undefined): OAuthPurpose {
+    if (!state) return 'login';
+    const row = this.database.db.prepare('SELECT purpose FROM oauth_web_states WHERE state=?').get(state) as { purpose?: string } | undefined;
+    return row?.purpose === 'repository' ? 'repository' : 'login';
   }
 
   session(token: string | undefined): SessionUser | null {
@@ -123,8 +123,8 @@ export class OAuthService {
     return { token: token.token, expiresAt: token.expiresAt, user: this.toSessionUser(row) };
   }
 
-  connectionStatus(user: SessionUser, repository: string) {
-    const connected = this.github.hasConnectionFor(user.githubId);
+  connectionStatus(repository: string) {
+    const connected = this.github.hasToken();
     return { connected, login: connected ? this.github.login() || null : null, repository: connected ? repository || null : null };
   }
 
@@ -186,13 +186,6 @@ export class OAuthService {
     this.database.db.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(timestamp);
     this.database.db.prepare('INSERT INTO sessions(token_hash,user_id,created_at,expires_at) VALUES(?,?,?,?)').run(this.tokenHash(token), userId, timestamp, expiresAt);
     return { token, expiresAt };
-  }
-
-  private userById(id: string): StoredUser | null {
-    const user = this.database.db.prepare('SELECT id,github_id,github_login,email,avatar_url FROM users WHERE id=?').get(id) as {
-      id: string; github_id: string; github_login: string; email: string; avatar_url: string;
-    } | undefined;
-    return user ? { ...this.toSessionUser(user), githubId: user.github_id } : null;
   }
 
   private toSessionUser(row: { id: string; github_id: string; github_login: string; email: string; avatar_url: string }): SessionUser {

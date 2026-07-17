@@ -3,8 +3,48 @@ import { Check, Github, LoaderCircle, ShieldAlert, ShieldCheck } from 'lucide-re
 import { githubApi, type GitHubRepository, type SyncStatus } from '../../api';
 import { formatBytes, messageOf, phaseText } from '../../app/constants';
 
-export function SetupScreen({ feedback, children }: { feedback?: ReactNode; children: ReactNode }) {
-  return <main className="setup-screen">{feedback}{children}</main>;
+export function SetupScreen({ feedback, children, centered = false }: { feedback?: ReactNode; children: ReactNode; centered?: boolean }) {
+  return <main className={centered ? 'setup-screen setup-screen-centered' : 'setup-screen'}>{feedback}{children}</main>;
+}
+
+export function AuthenticatorGate({ error, onVerify }: { error: string | null; onVerify: (code: string) => Promise<void> }) {
+  const [code, setCode] = useState('');
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const verify = async () => {
+    setSubmitting(true);
+    setLocalError(null);
+    try {
+      await onVerify(code);
+    } catch (reason) {
+      setLocalError(messageOf(reason));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return <section className="setup-card authenticator-gate">
+    <div className="authenticator-heading"><ShieldCheck size={24} /><h1>Authenticator 验证</h1></div>
+    <form className="authenticator-form" onSubmit={(event) => { event.preventDefault(); void verify(); }}>
+      <input
+        aria-label="Authenticator 验证码"
+        autoFocus
+        autoComplete="one-time-code"
+        className="authenticator-code-input"
+        inputMode="numeric"
+        maxLength={6}
+        pattern="[0-9]{6}"
+        placeholder="输入 6 位验证码"
+        value={code}
+        onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+      />
+      <button type="submit" className="accent-button authenticator-confirm" disabled={submitting || code.length !== 6}>
+        {submitting ? '验证中…' : '确认'}
+      </button>
+    </form>
+    {(localError || error) && <span className="setup-error">{localError || error}</span>}
+  </section>;
 }
 
 export function GitHubLogin({ error, onLogin }: { error: string | null; onLogin: () => Promise<void> }) {

@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 import { NotesController, parseByteRange } from '../src/modules/notes/notes.controller.js';
-import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { NoteService } from '../src/modules/notes/note.service.js';
 
 describe('media byte ranges', () => {
@@ -18,34 +17,18 @@ describe('media byte ranges', () => {
   });
 });
 
-describe('note tree compatibility', () => {
+describe('note tree', () => {
   const tree = {
     files: [{ path: '笔记.md', revision: 'revision', assetVersion: 'asset', updated_at: 'now' }],
     folders: ['空文件夹'],
   };
 
-  const reply = () => {
-    const value = {
-      code: vi.fn(),
-      header: vi.fn(),
-      send: vi.fn(),
-    };
-    value.code.mockReturnValue(value);
-    value.header.mockReturnValue(value);
-    return value;
-  };
-
-  it('keeps the legacy array response unless Web explicitly requests folders', async () => {
+  it('always returns files and folders together', async () => {
     const notes = { tree: vi.fn(async () => tree) } as unknown as NoteService;
     const controller = new NotesController(notes);
-    const request = { headers: {} } as FastifyRequest;
-    const legacyReply = reply();
-    const webReply = reply();
 
-    await controller.tree(undefined, request, legacyReply as unknown as FastifyReply);
-    await controller.tree('1', request, webReply as unknown as FastifyReply);
+    await expect(controller.tree()).resolves.toEqual(tree);
 
-    expect(legacyReply.send).toHaveBeenCalledWith(tree.files);
-    expect(webReply.send).toHaveBeenCalledWith(tree);
+    expect(notes.tree).toHaveBeenCalledOnce();
   });
 });

@@ -1,7 +1,6 @@
 import { Body, Controller, Delete, Get, Inject, Post, Put, Query, Req, Res } from '@nestjs/common';
 import { createReadStream, promises as fs } from 'node:fs';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { hash } from '../../common/crypto.js';
 import { CreateFolderDto, DeleteNoteDto, SaveNoteDto } from './contracts/notes.dto.js';
 import { NoteService } from './note.service.js';
 
@@ -22,12 +21,8 @@ export class NotesController {
   constructor(@Inject(NoteService) private readonly notes: NoteService) {}
 
   @Get('tree')
-  async tree(@Query('includeFolders') includeFolders: string | undefined, @Req() request: FastifyRequest, @Res() reply: FastifyReply) {
-    const tree = await this.notes.tree();
-    const payload = includeFolders === '1' ? tree : tree.files;
-    const etag = `"${hash(JSON.stringify(payload))}"`;
-    if (request.headers['if-none-match'] === etag) return reply.code(304).header('ETag', etag).header('Cache-Control', 'private, max-age=0, must-revalidate').send();
-    return reply.header('ETag', etag).header('Cache-Control', 'private, max-age=0, must-revalidate').send(payload);
+  async tree() {
+    return this.notes.tree();
   }
 
   @Get('notes/content')

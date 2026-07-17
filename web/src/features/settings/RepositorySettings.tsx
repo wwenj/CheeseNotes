@@ -1,9 +1,9 @@
 import { useRef, useState, type TouchEvent } from 'react';
-import { ArrowLeft, ChevronRight, CircleHelp, Github, Info, LogOut, SlidersHorizontal, Type, X } from 'lucide-react';
+import { ArrowLeft, ChevronRight, CircleHelp, Github, Info, ShieldCheck, SlidersHorizontal, Type, X } from 'lucide-react';
 import type { GitHubConnection } from '../../api';
 import { defaultClientSettings } from '../../app/constants';
 
-type SettingsPage = 'menu' | 'reader' | 'repository' | 'about';
+type SettingsPage = 'menu' | 'reader' | 'repository' | 'authenticator' | 'about';
 
 type RepositorySettingsProps = {
   repository: string;
@@ -11,8 +11,8 @@ type RepositorySettingsProps = {
   readerFontSize: number;
   onReaderFontSizeChange: (value: number) => void;
   onClearReadingCache: () => Promise<void>;
+  onClearAuthenticatorAccess: () => Promise<void>;
   onDisconnect: () => Promise<void>;
-  onLogout: () => Promise<void>;
   onClose: () => void;
 };
 
@@ -38,11 +38,12 @@ function SettingsPageHeader({ title, onBack, onClose }: { title: string; onBack?
   </header>;
 }
 
-export default function RepositorySettings({ repository, auth, readerFontSize, onReaderFontSizeChange, onClearReadingCache, onDisconnect, onLogout, onClose }: RepositorySettingsProps) {
+export default function RepositorySettings({ repository, auth, readerFontSize, onReaderFontSizeChange, onClearReadingCache, onClearAuthenticatorAccess, onDisconnect, onClose }: RepositorySettingsProps) {
   const [page, setPage] = useState<SettingsPage>('menu');
   const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [clearingCache, setClearingCache] = useState(false);
+  const [clearingAuthenticatorAccess, setClearingAuthenticatorAccess] = useState(false);
   const detailSwipeStart = useRef<{ x: number; y: number } | null>(null);
 
   const confirmDisconnect = async () => {
@@ -60,6 +61,15 @@ export default function RepositorySettings({ repository, auth, readerFontSize, o
       await onClearReadingCache();
     } finally {
       setClearingCache(false);
+    }
+  };
+
+  const clearAuthenticatorAccess = async () => {
+    setClearingAuthenticatorAccess(true);
+    try {
+      await onClearAuthenticatorAccess();
+    } finally {
+      setClearingAuthenticatorAccess(false);
     }
   };
 
@@ -101,8 +111,8 @@ export default function RepositorySettings({ repository, auth, readerFontSize, o
       <nav className="settings-menu-list" aria-label="设置选项">
         <SettingsMenuItem icon={Type} title="阅读与编辑" onClick={() => setPage('reader')} />
         <SettingsMenuItem icon={Github} title="仓库与同步" onClick={() => setPage('repository')} />
+        <SettingsMenuItem icon={ShieldCheck} title="Authenticator 验证" onClick={() => setPage('authenticator')} />
         <SettingsMenuItem icon={Info} title="关于芝士" onClick={() => setPage('about')} />
-        <SettingsMenuItem icon={LogOut} title="退出登录" onClick={() => void onLogout()} />
       </nav>
     </div>
   </section>;
@@ -137,6 +147,17 @@ export default function RepositorySettings({ repository, auth, readerFontSize, o
           <CircleHelp size={20} strokeWidth={1.8} />
           <div><h2>确认断开连接？</h2><p>断开后会清除当前服务已同步的本机内容、待同步修改和冲突记录。GitHub 仓库中的内容不会被删除。</p><div className="disconnect-confirmation-actions"><button type="button" className="settings-quiet-button" disabled={disconnecting} onClick={() => setConfirmingDisconnect(false)}>取消</button><button type="button" className="settings-danger-button" disabled={disconnecting} onClick={() => void confirmDisconnect()}>{disconnecting ? '正在断开…' : '清除并断开'}</button></div></div>
         </div>}
+      </section>
+    </main>
+  </section>;
+
+  if (page === 'authenticator') return <section className="settings-view settings-detail-view" onTouchStart={handleDetailTouchStart} onTouchEnd={handleDetailTouchEnd}>
+    <SettingsPageHeader title="Authenticator 验证" onBack={goBack} onClose={onClose} />
+    <main className="settings-detail-content">
+      <p className="settings-group-label">当前设备</p>
+      <section className="settings-detail-group">
+        <div className="settings-detail-row"><span>验证状态</span><strong>已验证</strong></div>
+        <button type="button" className="settings-danger-trigger" disabled={clearingAuthenticatorAccess} onClick={() => void clearAuthenticatorAccess()}>{clearingAuthenticatorAccess ? '正在退出…' : '退出验证'}</button>
       </section>
     </main>
   </section>;

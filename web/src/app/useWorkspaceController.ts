@@ -223,7 +223,7 @@ export function useWorkspaceController(enabled = true) {
       }
 
       const workspaceKey = workspaceKeyFor(config.repository);
-      const nextTree = await notesApi.tree(undefined, undefined, true);
+      const nextTree = await notesApi.tree();
       if (nextTree.files) {
         setFiles(nextTree.files);
         setFolders(nextTree.folders ?? []);

@@ -1,5 +1,4 @@
 import Database from 'better-sqlite3';
-import { UnauthorizedException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import type { DatabaseService } from '../src/modules/database/database.service.js';
 import type { GitHubAccount, GitHubService } from '../src/modules/github/github.service.js';
@@ -112,28 +111,23 @@ describe('GitHub whitelist login', () => {
     expect(() => oauth.exchangeMobileHandoff(handoff)).toThrow('移动端登录已过期');
   });
 
-  it('only stores a repository token when its GitHub identity matches the signed-in user', async () => {
+  it('stores a repository token without requiring a local login session', async () => {
     const { db, github, oauth } = fixture();
-    state(db, 'login-user', 'login');
-    const login = await oauth.finishWeb('code', 'login-user');
-    if (login.purpose !== 'login') throw new Error('expected login result');
-    state(db, 'repository', 'repository', login.user.id);
+    state(db, 'repository', 'repository');
 
-    const result = await oauth.finishWeb('repo-code', 'repository', login.user.id);
+    const result = await oauth.finishWeb('repo-code', 'repository');
 
     expect(result).toEqual({ purpose: 'repository', client: 'web', login: 'man' });
     expect(github.saveToken).toHaveBeenCalledWith('github-token', expect.objectContaining({ id: 'github-42', login: 'man' }));
 
-    state(db, 'repository-ios', 'repository', login.user.id, 'ios');
+    state(db, 'repository-ios', 'repository', '', 'ios');
     await expect(oauth.finishWeb('repo-code', 'repository-ios')).resolves.toEqual({ purpose: 'repository', client: 'ios', login: 'man' });
   });
 });
 
 describe('SessionGuard', () => {
-  it('allows public routes and rejects protected routes without a session', () => {
-    const oauth = { session: vi.fn().mockReturnValue(null) } as unknown as OAuthService;
-    const reflector = { getAllAndOverride: vi.fn().mockReturnValueOnce(true).mockReturnValueOnce(false) } as never;
-    const guard = new SessionGuard(reflector, oauth);
+  it('allows every route while system login is disabled', () => {
+    const guard = new SessionGuard();
     const request = { cookies: {} };
     const context = {
       getHandler: () => undefined,
@@ -142,14 +136,10 @@ describe('SessionGuard', () => {
     } as never;
 
     expect(guard.canActivate(context)).toBe(true);
-    expect(() => guard.canActivate(context)).toThrow(UnauthorizedException);
   });
 
-  it('uses a bearer token when a mobile request has no session cookie', () => {
-    const user = { id: 'user-1' };
-    const oauth = { session: vi.fn().mockReturnValue(user) } as unknown as OAuthService;
-    const reflector = { getAllAndOverride: vi.fn().mockReturnValue(false) } as never;
-    const guard = new SessionGuard(reflector, oauth);
+  it('does not inspect a legacy bearer token', () => {
+    const guard = new SessionGuard();
     const request = { cookies: {}, headers: { authorization: 'Bearer mobile-session-token' } };
     const context = {
       getHandler: () => undefined,
@@ -158,6 +148,5 @@ describe('SessionGuard', () => {
     } as never;
 
     expect(guard.canActivate(context)).toBe(true);
-    expect(oauth.session).toHaveBeenCalledWith('mobile-session-token');
   });
 });

@@ -1,10 +1,14 @@
-import { mobileSessionToken } from './mobile-session';
+import { isNativeIOS, mobileSessionToken } from './mobile-session';
+import { deviceToken } from './device-access';
 
 export class ApiError extends Error {
   constructor(message: string, readonly status?: number) { super(message); }
 }
 
 export const authExpiredEvent = 'noteai:auth-expired';
+export const accessRequiredEvent = 'noteai:access-required';
+export type AccessRequiredDetail = { rejectedToken: string | null };
+export type AuthorizedFetchResult = { response: Response; deviceToken: string | null };
 
 export function notifyAuthExpired(status: number) {
   if (status === 401 || status === 403) window.dispatchEvent(new Event(authExpiredEvent));
@@ -13,28 +17,47 @@ export function notifyAuthExpired(status: number) {
 declare const __NOTE_SERVICE_BASE_URL__: string;
 
 const buildTimeBaseUrl = __NOTE_SERVICE_BASE_URL__.replace(/\/$/, '');
-const configuredBaseUrl = () => localStorage.getItem('note-service-url')?.replace(/\/$/, '') || buildTimeBaseUrl;
+// Web 端由同域 Nest 托管，不能让历史调试配置把请求导向旧服务。
+// 只有 iOS 打包副本需要通过这个值指定生产 API 地址。
+const configuredBaseUrl = () => isNativeIOS()
+  ? localStorage.getItem('note-service-url')?.replace(/\/$/, '') || buildTimeBaseUrl
+  : buildTimeBaseUrl;
 
 export function apiUrl(path: string) {
   return `${configuredBaseUrl()}/api/${path.replace(/^\//, '')}`;
 }
 
-export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+export async function fetchWithAuthorization(url: string, options: RequestInit = {}): Promise<AuthorizedFetchResult> {
   const headers = new Headers(options.headers);
   if (options.body) headers.set('Content-Type', 'application/json');
   const token = await mobileSessionToken();
   if (token) headers.set('Authorization', `Bearer ${token}`);
-  let response: Response;
+  const trustedDeviceToken = await deviceToken();
+  if (trustedDeviceToken) headers.set('X-Device-Token', trustedDeviceToken);
   try {
-    response = await fetch(apiUrl(path), { ...options, headers, credentials: 'include' });
+    const response = await fetch(url, { ...options, headers, credentials: 'include' });
+    return { response, deviceToken: trustedDeviceToken };
   } catch {
     throw new ApiError('无法连接服务，请检查服务地址。');
   }
+}
+
+export async function apiErrorFromResponse(response: Response, rejectedToken: string | null) {
+  const result = await response.json().catch(() => null) as { code?: string; message?: string | string[] } | null;
+  if (result?.code === 'DEVICE_AUTH_REQUIRED') {
+    window.dispatchEvent(new CustomEvent<AccessRequiredDetail>(accessRequiredEvent, {
+      detail: { rejectedToken },
+    }));
+  }
+  else notifyAuthExpired(response.status);
+  const message = Array.isArray(result?.message) ? result.message.join('；') : result?.message;
+  return new ApiError(message || `请求失败（${response.status}）`, response.status);
+}
+
+export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const { response, deviceToken: trustedDeviceToken } = await fetchWithAuthorization(apiUrl(path), options);
   if (!response.ok) {
-    notifyAuthExpired(response.status);
-    const result = await response.json().catch(() => null) as { message?: string | string[] } | null;
-    const message = Array.isArray(result?.message) ? result.message.join('；') : result?.message;
-    throw new ApiError(message || `请求失败（${response.status}）`, response.status);
+    throw await apiErrorFromResponse(response, trustedDeviceToken);
   }
   return response.json() as Promise<T>;
 }

@@ -35,7 +35,17 @@
 .setup-login-brand img { display: block; width: 38px; height: 38px; object-fit: contain; }
 .setup-login-card h1 { margin: 0 0 18px; font-size: 25px; letter-spacing: -.04em; }
 .setup-login-card .setup-action { margin: 0; }
-@media (max-width: 720px) { .setup-screen { place-items: start center; padding: 24px 16px calc(24px + env(safe-area-inset-bottom)); }.setup-connect-card { margin: clamp(24px, 8vh, 64px) 0 24px; padding: 28px 22px 24px; border-radius: 14px; }.setup-brand-mark { margin-bottom: 22px; }.setup-connect-card h1 { font-size: 30px; }.setup-login-card h1 { font-size: 25px; }.setup-connect-card > p { margin-bottom: 26px; }.setup-form { gap: 16px; } }
+.authenticator-gate { width: min(100%, 320px); justify-items: stretch; }
+.authenticator-heading { display: flex; align-items: center; justify-content: center; gap: 9px; margin-bottom: 20px; color: #252c35; }
+.authenticator-heading svg { flex: 0 0 auto; }
+.authenticator-gate .authenticator-heading h1 { margin: 0; font-size: 22px; font-weight: 680; letter-spacing: -.02em; }
+.authenticator-form { display: grid; gap: 12px; }
+.authenticator-code-input { width: 100%; height: 48px !important; padding: 0 14px !important; border: 1px solid #dfe3e8 !important; border-radius: 9px !important; outline: none; color: #27313b; background: #fff !important; font-family: "SFMono-Regular", Menlo, Consolas, monospace; font-size: 18px !important; font-weight: 620; letter-spacing: .08em; text-align: center; }
+.authenticator-code-input::placeholder { color: #737d88; font-family: "PingFang SC", "Hiragino Sans GB", sans-serif; font-size: 13px; font-weight: 400; letter-spacing: 0; }
+.authenticator-code-input:focus { border-color: #9ba8b6 !important; box-shadow: 0 0 0 4px rgb(61 85 111 / .09) !important; }
+.authenticator-confirm { width: 100%; min-height: 46px; border-radius: 9px; }
+.authenticator-gate .setup-error { margin: 12px 0 0; text-align: center; }
+@media (max-width: 720px) { .setup-screen { place-items: start center; padding: 24px 16px calc(24px + env(safe-area-inset-bottom)); }.setup-screen.setup-screen-centered { place-items: center; }.setup-connect-card { margin: clamp(24px, 8vh, 64px) 0 24px; padding: 28px 22px 24px; border-radius: 14px; }.setup-brand-mark { margin-bottom: 22px; }.setup-connect-card h1 { font-size: 30px; }.setup-login-card h1 { font-size: 25px; }.setup-connect-card > p { margin-bottom: 26px; }.setup-form { gap: 16px; } }
 
 .reader-document { --article-title-size: calc(var(--reader-font-size, 18px) * 1.46); --article-body-line-height: 1.88; --article-heading-2-size: 1.38em; }
 .reader-document .markdown-view { font-size: var(--reader-font-size, 18px); line-height: var(--article-body-line-height); font-kerning: auto; font-variant-ligatures: normal; letter-spacing: normal; }

@@ -1,5 +1,6 @@
 import type { Note } from '../api';
-import { isNativeIOS, mobileSessionToken } from '../api/mobile-session';
+import { apiErrorFromResponse, fetchWithAuthorization } from '../api/http';
+import { isNativeIOS } from '../api/mobile-session';
 
 const databaseName = 'noteai-reading-cache';
 const databaseVersion = 3;
@@ -153,11 +154,9 @@ export async function cachedAssetSource(source: string) {
   const cache = canCache ? await caches.open(assetCacheName) : null;
   let response = cache ? await cache.match(source) : undefined;
   if (!response) {
-    const headers = new Headers();
-    const token = await mobileSessionToken();
-    if (token) headers.set('Authorization', `Bearer ${token}`);
-    response = await fetch(source, { headers, credentials: 'include' });
-    if (!response.ok) throw new Error(`资源请求失败（${response.status}）`);
+    const result = await fetchWithAuthorization(source);
+    response = result.response;
+    if (!response.ok) throw await apiErrorFromResponse(response, result.deviceToken);
     await cache?.put(source, response.clone());
   }
   const blob = await response.blob();

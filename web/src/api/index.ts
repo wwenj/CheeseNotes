@@ -1,4 +1,7 @@
-export { ApiError, authExpiredEvent, notifyAuthExpired, saveServiceUrl, serviceUrl } from './http';
+export { accessRequiredEvent, ApiError, apiErrorFromResponse, authExpiredEvent, fetchWithAuthorization, notifyAuthExpired, saveServiceUrl, serviceUrl } from './http';
+export type { AccessRequiredDetail, AuthorizedFetchResult } from './http';
+export { accessApi } from './access';
+export type { AccessStatus, AccessVerification } from './access';
 export { authApi } from './auth';
 export type { AuthClient, AuthSession, CurrentUser, MobileSession } from './auth';
 export { notesApi } from './notes';

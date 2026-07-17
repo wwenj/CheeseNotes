@@ -60,7 +60,7 @@ beforeEach(() => {
   api.repository.mockResolvedValue({ repository: 'man/notes', branch: 'main' });
   api.syncStatus.mockResolvedValue(verified);
   api.syncRun.mockResolvedValue(verified);
-  api.tree.mockResolvedValue({ files: [], folders: [], etag: 'tree' });
+  api.tree.mockResolvedValue({ files: [], folders: [] });
 });
 
 afterEach(() => {
