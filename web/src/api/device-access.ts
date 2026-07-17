@@ -6,7 +6,12 @@ let activeDeviceToken: string | null | undefined;
 
 export async function deviceToken() {
   if (activeDeviceToken !== undefined) return activeDeviceToken;
-  activeDeviceToken = isNativeIOS() ? await SecureStorage.getItem(deviceTokenKey) : localStorage.getItem(deviceTokenKey);
+  if (isNativeIOS()) {
+    const stored = await SecureStorage.get(deviceTokenKey);
+    activeDeviceToken = typeof stored === 'string' ? stored : null;
+  } else {
+    activeDeviceToken = localStorage.getItem(deviceTokenKey);
+  }
   return activeDeviceToken;
 }
 
