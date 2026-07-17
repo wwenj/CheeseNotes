@@ -44,10 +44,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         logo.accessibilityLabel = "芝士"
 
         let name = makeLabel("芝士", size: 36, weight: .heavy, color: UIColor(red: 55 / 255, green: 45 / 255, blue: 22 / 255, alpha: 1))
-        let tagline = makeLabel("知识有味，笔记有序", size: 17, weight: .semibold, color: UIColor(red: 115 / 255, green: 95 / 255, blue: 61 / 255, alpha: 1))
-        let detail = makeLabel("本地优先 · GitHub 同步", size: 13, weight: .regular, color: UIColor(red: 154 / 255, green: 137 / 255, blue: 95 / 255, alpha: 1))
+        let tagline = makeLabel("芝士，就是力量", size: 17, weight: .semibold, color: UIColor(red: 115 / 255, green: 95 / 255, blue: 61 / 255, alpha: 1))
 
-        let content = UIStackView(arrangedSubviews: [logo, name, tagline, detail])
+        let content = UIStackView(arrangedSubviews: [logo, name, tagline])
         content.translatesAutoresizingMaskIntoConstraints = false
         content.axis = .vertical
         content.alignment = .center
@@ -65,7 +64,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             logo.widthAnchor.constraint(equalToConstant: 178),
             logo.heightAnchor.constraint(equalToConstant: 178),
             content.centerXAnchor.constraint(equalTo: splash.centerXAnchor),
-            content.centerYAnchor.constraint(equalTo: splash.centerYAnchor, constant: -26),
+            content.centerYAnchor.constraint(equalTo: splash.centerYAnchor, constant: -12),
             content.leadingAnchor.constraint(greaterThanOrEqualTo: splash.safeAreaLayoutGuide.leadingAnchor, constant: 24),
             content.trailingAnchor.constraint(lessThanOrEqualTo: splash.safeAreaLayoutGuide.trailingAnchor, constant: -24),
         ])

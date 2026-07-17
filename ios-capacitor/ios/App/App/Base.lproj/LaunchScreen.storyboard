@@ -16,24 +16,18 @@
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                         <subviews>
                             <imageView userInteractionEnabled="NO" contentMode="scaleAspectFit" horizontalHuggingPriority="251" verticalHuggingPriority="251" image="CheeseLaunchSplash" translatesAutoresizingMaskIntoConstraints="NO" id="hJ2-6j-SYB">
-                                <rect key="frame" x="98.5" y="153.0" width="178" height="178"/>
+                                <rect key="frame" x="98.5" y="193.0" width="178" height="178"/>
                             </imageView>
                             <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="芝士" textAlignment="center" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="ZO0-8d-R0I">
-                                <rect key="frame" x="151.5" y="357.0" width="72" height="43"/>
+                                <rect key="frame" x="151.5" y="397.0" width="72" height="43"/>
                                 <fontDescription key="fontDescription" type="system" weight="heavy" pointSize="36"/>
                                 <color key="textColor" red="0.2156862745" green="0.1764705882" blue="0.0862745098" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
                                 <nil key="highlightedColor"/>
                             </label>
-                            <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="知识有味，笔记有序" textAlignment="center" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="c0R-dn-7O0">
-                                <rect key="frame" x="111.5" y="414.0" width="152" height="20"/>
+                            <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="芝士，就是力量" textAlignment="center" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="c0R-dn-7O0">
+                                <rect key="frame" x="128.0" y="454.0" width="119" height="20"/>
                                 <fontDescription key="fontDescription" type="system" weight="semibold" pointSize="17"/>
                                 <color key="textColor" red="0.4509803922" green="0.3725490196" blue="0.2392156863" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
-                                <nil key="highlightedColor"/>
-                            </label>
-                            <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="本地优先 · GitHub 同步" textAlignment="center" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="L1s-Cy-dK5">
-                                <rect key="frame" x="113.0" y="446.0" width="149" height="16"/>
-                                <fontDescription key="fontDescription" type="system" pointSize="13"/>
-                                <color key="textColor" red="0.6039215686" green="0.537254902" blue="0.3725490196" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
                                 <nil key="highlightedColor"/>
                             </label>
                         </subviews>
@@ -43,13 +37,11 @@
                             <constraint firstItem="hJ2-6j-SYB" firstAttribute="width" constant="178" id="3Bg-7t-CUo"/>
                             <constraint firstItem="hJ2-6j-SYB" firstAttribute="height" constant="178" id="8W7-BU-rGj"/>
                             <constraint firstItem="hJ2-6j-SYB" firstAttribute="centerX" secondItem="Ze5-6b-2t3" secondAttribute="centerX" id="aAv-7V-2RV"/>
-                            <constraint firstItem="hJ2-6j-SYB" firstAttribute="centerY" secondItem="Ze5-6b-2t3" secondAttribute="centerY" constant="-92" id="c0N-Hn-WqD"/>
+                            <constraint firstItem="hJ2-6j-SYB" firstAttribute="centerY" secondItem="Ze5-6b-2t3" secondAttribute="centerY" constant="-52" id="c0N-Hn-WqD"/>
                             <constraint firstItem="ZO0-8d-R0I" firstAttribute="top" secondItem="hJ2-6j-SYB" secondAttribute="bottom" constant="26" id="g5v-QV-bh0"/>
                             <constraint firstItem="ZO0-8d-R0I" firstAttribute="centerX" secondItem="Ze5-6b-2t3" secondAttribute="centerX" id="hPA-80-d62"/>
                             <constraint firstItem="c0R-dn-7O0" firstAttribute="top" secondItem="ZO0-8d-R0I" secondAttribute="bottom" constant="14" id="mTj-NL-8Fr"/>
                             <constraint firstItem="c0R-dn-7O0" firstAttribute="centerX" secondItem="Ze5-6b-2t3" secondAttribute="centerX" id="qXp-CM-h75"/>
-                            <constraint firstItem="L1s-Cy-dK5" firstAttribute="top" secondItem="c0R-dn-7O0" secondAttribute="bottom" constant="12" id="tT9-da-9a4"/>
-                            <constraint firstItem="L1s-Cy-dK5" firstAttribute="centerX" secondItem="Ze5-6b-2t3" secondAttribute="centerX" id="yQp-Rd-Lq5"/>
                         </constraints>
                     </view>
                 </viewController>
