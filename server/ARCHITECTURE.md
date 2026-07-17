@@ -14,7 +14,7 @@ src/
     ├── database/                   # SQLite 连接、schema 初始化和 settings
     ├── storage/                    # 路径安全策略和笔记文件存储
     ├── github/                     # GitHub API client 和仓库列表接口
-    ├── auth/                       # GitHub OAuth、登录回调和认证状态
+    ├── auth/                       # Authenticator 设备验证与 GitHub 仓库授权
     ├── settings/                   # 当前仓库及分支设置
     │   └── settings-api.module.ts  # 设置 HTTP API 组装层
     ├── notes/                      # 笔记读取、编辑、渲染、搜索和资源文件
@@ -58,7 +58,7 @@ Notes ───────────────────────> Sto
 | Sync | `GET /api/sync/status`、`POST /api/sync` |
 | Sync | `GET /api/sync/conflicts`、`GET /api/sync/conflicts/:id`、`PUT /api/sync/conflicts/decisions`、`PUT /api/sync/conflicts/:id/decision`、`POST /api/sync/conflicts/apply-decisions` |
 | Settings | `GET /api/settings/repository`、`PUT /api/settings/repository` |
-| GitHub OAuth | `POST /api/auth/github/login`、`GET /api/auth/github/callback`、`GET /api/auth/github/status`、`DELETE /api/auth/github` |
+| GitHub OAuth | `POST /api/auth/github/connect`、`GET /api/auth/github/callback`、`GET /api/auth/github/status`、`DELETE /api/auth/github` |
 | GitHub | `GET /api/github/repositories` |
 | Maintenance | `POST /api/maintenance/reset/prepare`、`POST /api/maintenance/reset/execute` |
 

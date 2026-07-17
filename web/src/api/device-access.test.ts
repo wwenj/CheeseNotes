@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('./mobile-session', () => ({ isNativeIOS: () => false }));
+vi.mock('./platform', () => ({ isNativeIOS: () => false }));
 
 beforeEach(() => {
   const values = new Map<string, string>();

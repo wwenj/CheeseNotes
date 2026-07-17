@@ -1,6 +1,6 @@
 import type { Note } from '../api';
 import { apiErrorFromResponse, fetchWithAuthorization } from '../api/http';
-import { isNativeIOS } from '../api/mobile-session';
+import { isNativeIOS } from '../api/platform';
 
 const databaseName = 'noteai-reading-cache';
 const databaseVersion = 3;

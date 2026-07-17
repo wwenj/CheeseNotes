@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { Check, Github, LoaderCircle, ShieldAlert, ShieldCheck } from 'lucide-react';
+import { Check, Github, LoaderCircle, ShieldCheck } from 'lucide-react';
 import { githubApi, type GitHubRepository, type SyncStatus } from '../../api';
 import { formatBytes, messageOf, phaseText } from '../../app/constants';
 
@@ -44,41 +44,6 @@ export function AuthenticatorGate({ error, onVerify }: { error: string | null; o
       </button>
     </form>
     {(localError || error) && <span className="setup-error">{localError || error}</span>}
-  </section>;
-}
-
-export function GitHubLogin({ error, onLogin }: { error: string | null; onLogin: () => Promise<void> }) {
-  const [localError, setLocalError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-
-  const begin = async () => {
-    setSubmitting(true);
-    setLocalError(null);
-    try {
-      await onLogin();
-    } catch (reason) {
-      setLocalError(messageOf(reason));
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return <section className="setup-card setup-connect-card setup-login-card">
-    <div className="setup-brand-mark setup-login-brand"><img src="/cheese-logo.png" alt="" /><span>芝士</span></div>
-    <h1>使用 GitHub 登录</h1>
-    <button type="button" className="accent-button setup-action" disabled={submitting} onClick={() => void begin()}>
-      {submitting ? <LoaderCircle className="spin" size={16} /> : <Github size={16} />}使用 GitHub 登录
-    </button>
-    {(localError || error) && <span className="setup-error">{localError || error}</span>}
-  </section>;
-}
-
-export function AccessDenied({ onRetry }: { onRetry: () => void }) {
-  return <section className="setup-card setup-connect-card setup-access-denied">
-    <div className="setup-brand-mark"><span className="setup-icon"><ShieldAlert size={25} /></span><span>访问控制</span></div>
-    <h1>暂无使用权限</h1>
-    <p>当前 GitHub 账号关联的已验证邮箱未获授权。请切换到获授权账号后重新登录。</p>
-    <button type="button" className="accent-button setup-action" onClick={onRetry}><Github size={16} />重新登录</button>
   </section>;
 }
 

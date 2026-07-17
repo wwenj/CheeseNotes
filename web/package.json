@@ -11,7 +11,6 @@
   },
   "dependencies": {
     "@aparajita/capacitor-secure-storage": "^8.0.0",
-    "@capacitor/app": "8.1.1",
     "@capacitor/browser": "8.0.4",
     "@capacitor/core": "8.4.1",
     "@codemirror/commands": "^6.10.4",

@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 
-const github = vi.hoisted(() => ({ startRepositoryAuthorization: vi.fn() }));
+const github = vi.hoisted(() => ({ openRepositoryAuthorization: vi.fn() }));
 const access = vi.hoisted(() => ({
   status: vi.fn(),
   verify: vi.fn(),
@@ -28,14 +28,6 @@ vi.mock('./api', () => ({
   githubApi: github,
 }));
 vi.mock('./api/device-access', () => deviceAccess);
-vi.mock('./api/mobile-auth', () => ({
-  listenForMobileAuthCallback: vi.fn().mockResolvedValue(() => undefined),
-  openAuthorization: vi.fn(),
-}));
-vi.mock('./api/mobile-session', () => ({
-  isNativeIOS: () => false,
-  clearMobileSessionToken: vi.fn(),
-}));
 vi.mock('./app/useWorkspaceController', () => ({ useWorkspaceController: () => workspace }));
 vi.mock('./app/routes', () => ({
   navigate: vi.fn(), panelForRoute: (pathname: string) => pathname === '/settings' ? 'settings' : 'vault', pathForPanel: () => '/', useAppRoute: () => ({ pathname: window.location.pathname }),
@@ -144,6 +136,15 @@ describe('application access gate', () => {
 
     expect(await screen.findByRole('heading', { name: '连接你的笔记库' })).toBeTruthy();
     expect(screen.queryByTestId('workspace-shell')).toBeNull();
+  });
+
+  it('opens repository authorization without a mobile callback listener', async () => {
+    workspace.auth = { connected: false, login: '', repository: '' };
+    workspace.repository = '';
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '连接 GitHub' }));
+    await waitFor(() => expect(github.openRepositoryAuthorization).toHaveBeenCalledOnce());
   });
 
   it('consumes a repository callback state', async () => {

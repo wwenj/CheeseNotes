@@ -4,8 +4,6 @@ PODS:
     - KeychainSwift (~> 21.0)
   - Capacitor (8.4.1):
     - CapacitorCordova
-  - CapacitorApp (8.1.1):
-    - Capacitor
   - CapacitorBrowser (8.0.4):
     - Capacitor
   - CapacitorCordova (8.4.1)
@@ -14,7 +12,6 @@ PODS:
 DEPENDENCIES:
   - "AparajitaCapacitorSecureStorage (from `../../node_modules/.pnpm/@aparajita+capacitor-secure-storage@8.0.0/node_modules/@aparajita/capacitor-secure-storage`)"
   - "Capacitor (from `../../node_modules/.pnpm/@capacitor+ios@8.4.1_@capacitor+core@8.4.1/node_modules/@capacitor/ios`)"
-  - "CapacitorApp (from `../../node_modules/.pnpm/@capacitor+app@8.1.1_@capacitor+core@8.4.1/node_modules/@capacitor/app`)"
   - "CapacitorBrowser (from `../../node_modules/.pnpm/@capacitor+browser@8.0.4_@capacitor+core@8.4.1/node_modules/@capacitor/browser`)"
   - "CapacitorCordova (from `../../node_modules/.pnpm/@capacitor+ios@8.4.1_@capacitor+core@8.4.1/node_modules/@capacitor/ios`)"
 
@@ -27,8 +24,6 @@ EXTERNAL SOURCES:
     :path: "../../node_modules/.pnpm/@aparajita+capacitor-secure-storage@8.0.0/node_modules/@aparajita/capacitor-secure-storage"
   Capacitor:
     :path: "../../node_modules/.pnpm/@capacitor+ios@8.4.1_@capacitor+core@8.4.1/node_modules/@capacitor/ios"
-  CapacitorApp:
-    :path: "../../node_modules/.pnpm/@capacitor+app@8.1.1_@capacitor+core@8.4.1/node_modules/@capacitor/app"
   CapacitorBrowser:
     :path: "../../node_modules/.pnpm/@capacitor+browser@8.0.4_@capacitor+core@8.4.1/node_modules/@capacitor/browser"
   CapacitorCordova:
@@ -37,11 +32,10 @@ EXTERNAL SOURCES:
 SPEC CHECKSUMS:
   AparajitaCapacitorSecureStorage: 8128d05cafcb13b00448e20fb388a0edccd44b12
   Capacitor: 35242afe195b1e53c58ca1b827d1b444c5e6602b
-  CapacitorApp: 305bd13c44f6f9d164e2ee66a4faa956ed8c0e06
   CapacitorBrowser: 752e0208aa07c7aa63d1f7cde895a3e9519b2656
   CapacitorCordova: eebe6bcf807b1b06f3f48237650f96bbcd0eef09
   KeychainSwift: 4a71a45c802fd9e73906457c2dcbdbdc06c9419d
 
-PODFILE CHECKSUM: 58f8b676406271de2b913cf4911e03fa1981997d
+PODFILE CHECKSUM: 418a5b35f15d7c2f5dafd49cd5453bdbf1dc9155
 
 COCOAPODS: 1.17.0

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ImgHTMLAttributes } from 'react';
-import { isNativeIOS } from '../api/mobile-session';
+import { isNativeIOS } from '../api/platform';
 import { cachedAssetSource } from '../lib/workspace-cache';
 
 type CachedImageProps = Omit<ImgHTMLAttributes<HTMLImageElement>, 'src'> & {

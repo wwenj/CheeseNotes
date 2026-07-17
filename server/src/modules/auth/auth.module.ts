@@ -8,7 +8,6 @@ import { AccessController } from './access.controller.js';
 import { AUTHENTICATOR_SECRET_VALUE, AuthenticatorService, localAuthenticatorSecret } from './authenticator.service.js';
 import { DeviceGuard } from './device.guard.js';
 import { OAuthService } from './oauth.service.js';
-import { SessionGuard } from './session.guard.js';
 
 @Module({
   imports: [GitHubModule, SettingsModule, SyncModule],
@@ -18,9 +17,7 @@ import { SessionGuard } from './session.guard.js';
     { provide: AUTHENTICATOR_SECRET_VALUE, useFactory: localAuthenticatorSecret },
     AuthenticatorService,
     DeviceGuard,
-    SessionGuard,
     { provide: APP_GUARD, useExisting: DeviceGuard },
-    { provide: APP_GUARD, useExisting: SessionGuard },
   ],
 })
 export class AuthModule {}

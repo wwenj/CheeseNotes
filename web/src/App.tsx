@@ -2,8 +2,6 @@ import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { LoaderCircle } from 'lucide-react';
 import { accessApi, accessRequiredEvent, ApiError, githubApi, type AccessRequiredDetail, type NoteSummary } from './api';
 import { clearDeviceToken, deviceToken, saveDeviceToken } from './api/device-access';
-import { listenForMobileAuthCallback, openAuthorization, type MobileAuthCallback } from './api/mobile-auth';
-import { isNativeIOS } from './api/mobile-session';
 import { useWorkspaceController } from './app/useWorkspaceController';
 import { navigate, panelForRoute, pathForPanel, useAppRoute } from './app/routes';
 import type { Panel } from './app/types';
@@ -87,22 +85,6 @@ export default function App() {
     setAccessState('required');
     navigate('/');
   }, []);
-
-  const handleMobileAuthCallback = useCallback(async (callback: MobileAuthCallback) => {
-    if (callback.kind === 'repository-connected') {
-      await workspace.reload(false);
-      workspace.setNotice('GitHub 已连接，请选择要同步的笔记库。');
-      return;
-    }
-    if (callback.kind === 'error') workspace.setError(callback.message);
-  }, [workspace.reload, workspace.setError, workspace.setNotice]);
-
-  useEffect(() => {
-    if (accessState !== 'authorized') return;
-    let remove: () => void = () => undefined;
-    void listenForMobileAuthCallback(handleMobileAuthCallback).then((listener) => { remove = listener; });
-    return () => remove();
-  }, [accessState, handleMobileAuthCallback]);
 
   const navigateToPanel = useCallback((nextPanel: Panel) => {
     const nextPath = pathForPanel(nextPanel);
@@ -225,8 +207,7 @@ export default function App() {
     : workspace.notice ? <Toast key={`notice:${workspace.notice}`} kind="notice" value={workspace.notice} onClose={closeNotice} /> : null;
 
   const startRepositoryConnection = useCallback(async () => {
-    const authorization = await githubApi.startRepositoryAuthorization(isNativeIOS() ? 'ios' : 'web');
-    await openAuthorization(authorization.url);
+    await githubApi.openRepositoryAuthorization();
   }, []);
 
   if (accessState === 'checking') return <SetupScreen><LoaderCircle className="spin" size={21} />正在检查设备授权</SetupScreen>;
@@ -264,8 +245,8 @@ export default function App() {
   const vaultContent = editingArticle
     ? workspace.articleMode === 'write'
       ? <Suspense fallback={<div className="document-loading" role="status"><LoaderCircle className="spin" size={20} /></div>}><ArticleEditor key={editingArticle.selected.path} draft={editingArticle.draft} readerFontSize={workspace.clientSettings.readerFontSize} sourcePath={editingArticle.selected.path} files={workspace.files} onChange={workspace.updateDraftContent} onSave={() => { void workspace.flushCurrentDraft(); }} /></Suspense>
-      : <DocumentView selected={editingArticle.selected} note={{ ...editingArticle.note, content: editingArticle.draft.content }} files={workspace.files} loading={workspace.loading || workspace.loadingFile} readerFontSize={workspace.clientSettings.readerFontSize} onOpen={openDocumentPath} onNew={openNew} />
-    : <DocumentView selected={workspace.selected} note={workspace.note} files={workspace.files} loading={workspace.loading || workspace.loadingFile} readerFontSize={workspace.clientSettings.readerFontSize} onOpen={openDocumentPath} onNew={openNew} />;
+      : <DocumentView selected={editingArticle.selected} note={{ ...editingArticle.note, content: editingArticle.draft.content }} files={workspace.files} recentArticles={workspace.recentArticles} sync={workspace.sync} loading={workspace.loading || workspace.loadingFile} readerFontSize={workspace.clientSettings.readerFontSize} onOpen={openDocumentPath} onNew={openNew} />
+    : <DocumentView selected={workspace.selected} note={workspace.note} files={workspace.files} recentArticles={workspace.recentArticles} sync={workspace.sync} loading={workspace.loading || workspace.loadingFile} readerFontSize={workspace.clientSettings.readerFontSize} onOpen={openDocumentPath} onNew={openNew} />;
 
   const content = panel === 'vault' ? vaultContent
     : panel === 'sync' ? <SyncPanel sync={workspace.sync} onSync={workspace.runSync} onSyncStatus={workspace.setSync} onRefresh={() => void workspace.reload(false, { preserveCurrentDocument: true, forceTreeRefresh: true })} onError={workspace.setError} onClose={closeSettingsToExplorer} />

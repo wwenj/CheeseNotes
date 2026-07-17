@@ -1,18 +1,13 @@
-import { isNativeIOS, mobileSessionToken } from './mobile-session';
 import { deviceToken } from './device-access';
+import { isNativeIOS } from './platform';
 
 export class ApiError extends Error {
   constructor(message: string, readonly status?: number) { super(message); }
 }
 
-export const authExpiredEvent = 'noteai:auth-expired';
 export const accessRequiredEvent = 'noteai:access-required';
 export type AccessRequiredDetail = { rejectedToken: string | null };
 export type AuthorizedFetchResult = { response: Response; deviceToken: string | null };
-
-export function notifyAuthExpired(status: number) {
-  if (status === 401 || status === 403) window.dispatchEvent(new Event(authExpiredEvent));
-}
 
 declare const __NOTE_SERVICE_BASE_URL__: string;
 
@@ -30,8 +25,6 @@ export function apiUrl(path: string) {
 export async function fetchWithAuthorization(url: string, options: RequestInit = {}): Promise<AuthorizedFetchResult> {
   const headers = new Headers(options.headers);
   if (options.body) headers.set('Content-Type', 'application/json');
-  const token = await mobileSessionToken();
-  if (token) headers.set('Authorization', `Bearer ${token}`);
   const trustedDeviceToken = await deviceToken();
   if (trustedDeviceToken) headers.set('X-Device-Token', trustedDeviceToken);
   try {
@@ -49,7 +42,6 @@ export async function apiErrorFromResponse(response: Response, rejectedToken: st
       detail: { rejectedToken },
     }));
   }
-  else notifyAuthExpired(response.status);
   const message = Array.isArray(result?.message) ? result.message.join('；') : result?.message;
   return new ApiError(message || `请求失败（${response.status}）`, response.status);
 }

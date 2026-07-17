@@ -1,5 +1,5 @@
 import { KeychainAccess, SecureStorage } from '@aparajita/capacitor-secure-storage';
-import { isNativeIOS } from './mobile-session';
+import { isNativeIOS } from './platform';
 
 const deviceTokenKey = 'noteai.device.token';
 let activeDeviceToken: string | null | undefined;

@@ -2,7 +2,7 @@ import 'reflect-metadata';
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
-import cookie from '@fastify/cookie';
+import fastifyStatic from '@fastify/static';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { existsSync, promises as fs } from 'node:fs';
 import { extname, resolve } from 'node:path';
@@ -24,7 +24,6 @@ const assetContentTypes: Record<string, string> = {
 
 async function bootstrap() {
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter({ logger: true }), { rawBody: true });
-  await app.register(cookie);
   app.setGlobalPrefix('api');
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true }));
   const config = runtimeConfig();
@@ -36,22 +35,17 @@ async function bootstrap() {
     });
   }
   const fastify = app.getHttpAdapter().getInstance();
-  fastify.get('/.well-known/apple-app-site-association', async (_request: FastifyRequest, reply: FastifyReply) => {
-    return reply
-      .type('application/json; charset=utf-8')
-      .header('Cache-Control', 'public, max-age=3600')
-      .send({ applinks: { details: [{ appIDs: [config.iosAppId], components: [{ '/': '/ios/auth/*' }] }] } });
-  });
-  fastify.get('/ios/auth/callback', async (_request: FastifyRequest, reply: FastifyReply) => {
-    return reply
-      .type('text/html; charset=utf-8')
-      .header('Cache-Control', 'no-store')
-      .header('Referrer-Policy', 'no-referrer')
-      .send('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>芝士</title><body style="margin:0;display:grid;min-height:100vh;place-items:center;background:#fff;color:#303b49;font:16px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif"><main style="text-align:center"><strong style="font-size:24px">芝士</strong><p>请返回 App 继续登录。</p></main></body></html>');
-  });
   const publicDir = resolve(process.cwd(), 'public');
   if (existsSync(publicDir)) {
     const indexPath = resolve(publicDir, 'index.html');
+    const imagesDir = resolve(publicDir, 'images');
+    if (existsSync(imagesDir)) {
+      await app.register(fastifyStatic, {
+        root: imagesDir,
+        prefix: '/images/',
+        maxAge: '1h',
+      });
+    }
     fastify.get('/assets/:file', async (request: FastifyRequest<{ Params: { file: string } }>, reply: FastifyReply) => {
       const { file } = request.params;
       if (!/^[\w.-]+$/.test(file)) return reply.code(404).send({ statusCode: 404, error: 'Not Found' });
@@ -64,10 +58,6 @@ async function bootstrap() {
       } catch {
         return reply.code(404).send({ statusCode: 404, error: 'Not Found' });
       }
-    });
-    fastify.get('/noteai-icon.png', async (_request: FastifyRequest, reply: FastifyReply) => {
-      const icon = await fs.readFile(resolve(publicDir, 'noteai-icon.png'));
-      return reply.type('image/png').header('Cache-Control', 'public, max-age=31536000, immutable').send(icon);
     });
     fastify.get('/*', async (request: FastifyRequest, reply: FastifyReply) => {
       if (request.url === '/api' || request.url.startsWith('/api/')) {

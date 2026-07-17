@@ -3,8 +3,74 @@ import type { SyncStatus } from '../api';
 import type { ClientSettings } from './types';
 
 export const clientSettingsKey = 'mynote.client-settings';
-export const lastArticleKey = 'mynote.last-open-article';
+const activeArticleKey = 'mynote.active-article';
+const recentArticlesKey = 'mynote.recent-articles';
+const recentArticleLimit = 6;
 export const defaultClientSettings: ClientSettings = { readerFontSize: 16 };
+
+type StoredArticle = {
+  repository: string;
+  path: string;
+};
+
+type RecentArticle = StoredArticle & {
+  openedAt: number;
+};
+
+function readStoredArticles() {
+  try {
+    const value = JSON.parse(localStorage.getItem(recentArticlesKey) || '[]');
+    if (!Array.isArray(value)) return [] as RecentArticle[];
+    return value.filter((item): item is RecentArticle => (
+      typeof item?.repository === 'string'
+      && typeof item?.path === 'string'
+      && typeof item?.openedAt === 'number'
+    ));
+  } catch {
+    return [] as RecentArticle[];
+  }
+}
+
+export function activeArticlePath(repository: string) {
+  try {
+    const value = JSON.parse(sessionStorage.getItem(activeArticleKey) || 'null') as StoredArticle | null;
+    return value?.repository === repository && typeof value.path === 'string' ? value.path : null;
+  } catch {
+    return null;
+  }
+}
+
+export function recentArticlePaths(repository: string) {
+  return readStoredArticles()
+    .filter((item) => item.repository === repository)
+    .sort((left, right) => right.openedAt - left.openedAt)
+    .map((item) => item.path);
+}
+
+export function rememberOpenedArticle(repository: string, path: string) {
+  const article = { repository, path };
+  try {
+    sessionStorage.setItem(activeArticleKey, JSON.stringify(article));
+  } catch {
+    // 读取模式或受限 WebView 不支持 sessionStorage 时，仍可正常打开文档。
+  }
+  try {
+    const recent = readStoredArticles().filter((item) => item.repository !== repository || item.path !== path);
+    localStorage.setItem(recentArticlesKey, JSON.stringify([{ ...article, openedAt: Date.now() }, ...recent].slice(0, recentArticleLimit)));
+  } catch {
+    // 最近访问只是入口辅助，不应影响文档打开。
+  }
+}
+
+export function forgetOpenedArticle(repository: string, path: string) {
+  try {
+    const active = activeArticlePath(repository);
+    if (active === path) sessionStorage.removeItem(activeArticleKey);
+    localStorage.setItem(recentArticlesKey, JSON.stringify(readStoredArticles().filter((item) => item.repository !== repository || item.path !== path)));
+  } catch {
+    // 删除已完成；本地入口记录清理失败无需阻断后续流程。
+  }
+}
 
 export const stateText: Record<SyncStatus['state'], string> = {
   unconfigured: '未设置仓库',

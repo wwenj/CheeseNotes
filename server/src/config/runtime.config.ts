@@ -6,7 +6,6 @@ type GitHubOAuthSettings = {
   clientSecret: string;
   authorizationCallbackUrl: string;
   homepageUrl: string;
-  sessionCookieDomain?: string;
 };
 
 type GitHubOAuthSettingsFile = Record<'development' | 'production', GitHubOAuthSettings>;
@@ -21,9 +20,6 @@ export type RuntimeConfig = {
   githubOAuthClientSecret: string;
   githubOAuthCallbackUrl: string;
   corsOrigins: string[];
-  sessionCookieDomain?: string;
-  iosUniversalLink: string;
-  iosAppId: string;
 };
 
 const githubOAuthConfigPath = () => resolve(process.cwd(), 'config', 'github-oauth.local.json');
@@ -43,22 +39,6 @@ const httpUrl = (value: string, key: keyof GitHubOAuthSettings, environment: str
   }
   if (!['http:', 'https:'].includes(url.protocol)) throw new Error(`GitHub OAuth ${environment} 配置中的 ${key} 必须使用 http 或 https。`);
   return url.href.replace(/\/$/, '');
-};
-
-const sessionCookieDomain = (value: string | undefined, callbackUrl: string, homepageUrl: string, environment: string) => {
-  if (!value?.trim()) return undefined;
-  const domain = value.trim().replace(/^\./, '').toLowerCase();
-  if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/.test(domain)) {
-    throw new Error(`GitHub OAuth ${environment} 配置中的 sessionCookieDomain 必须是根域名，例如 wwenj.com。`);
-  }
-  const covers = (url: string) => {
-    const hostname = new URL(url).hostname.toLowerCase();
-    return hostname === domain || hostname.endsWith(`.${domain}`);
-  };
-  if (!covers(callbackUrl) || !covers(homepageUrl)) {
-    throw new Error(`GitHub OAuth ${environment} 的 sessionCookieDomain 必须同时覆盖授权回调地址和首页地址。`);
-  }
-  return domain;
 };
 
 const githubOAuthSettings = (): GitHubOAuthSettings => {
@@ -83,25 +63,11 @@ const githubOAuthSettings = (): GitHubOAuthSettings => {
     clientSecret: requiredSetting(settings, 'clientSecret', environment),
     authorizationCallbackUrl,
     homepageUrl,
-    sessionCookieDomain: sessionCookieDomain(settings.sessionCookieDomain, authorizationCallbackUrl, homepageUrl, environment),
   };
-};
-
-const iosUniversalLink = () => {
-  const value = process.env.IOS_UNIVERSAL_LINK || 'https://note.wwenj.com/ios/auth/callback';
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    throw new Error('IOS_UNIVERSAL_LINK 必须是完整 HTTPS URL。');
-  }
-  if (url.protocol !== 'https:') throw new Error('IOS_UNIVERSAL_LINK 必须使用 HTTPS。');
-  return url.href.replace(/\/$/, '');
 };
 
 export const runtimeConfig = (): RuntimeConfig => {
   const oauth = githubOAuthSettings();
-  const mobileCallback = iosUniversalLink();
   const corsOriginSetting = process.env.CORS_ORIGINS ?? 'capacitor://localhost';
   const corsOrigins = [...new Set([new URL(oauth.homepageUrl).origin, ...corsOriginSetting.split(',').map((value) => value.trim()).filter(Boolean)])];
   return {
@@ -114,8 +80,5 @@ export const runtimeConfig = (): RuntimeConfig => {
     githubOAuthClientSecret: oauth.clientSecret,
     githubOAuthCallbackUrl: oauth.authorizationCallbackUrl,
     corsOrigins,
-    sessionCookieDomain: oauth.sessionCookieDomain,
-    iosUniversalLink: mobileCallback,
-    iosAppId: process.env.IOS_APP_ID || '6A36R6LTT2.com.wwenj.noteai.capacitor',
   };
 };

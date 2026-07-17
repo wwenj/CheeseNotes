@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { FileWarning } from 'lucide-react';
 import { notesApi } from '../api';
-import { isNativeIOS } from '../api/mobile-session';
+import { isNativeIOS } from '../api/platform';
 import { fileKind, fileName } from '../lib/files';
 import { cachedAssetSource } from '../lib/workspace-cache';
 import CachedImage from './CachedImage';

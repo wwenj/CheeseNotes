@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { githubApi, notesApi, settingsApi, syncApi, type GitHubConnection, type Note, type NoteSummary, type SyncStatus } from '../api';
 import { ApiError, apiUrl } from '../api/http';
 import type { ArticleMode, ClientSettings, Draft } from './types';
-import { clampReaderFontSize, clientSettingsKey, isSyncBusy, lastArticleKey, loadClientSettings, messageOf, newNotePath } from './constants';
+import { activeArticlePath, clampReaderFontSize, clientSettingsKey, forgetOpenedArticle, isSyncBusy, loadClientSettings, messageOf, newNotePath, recentArticlePaths, rememberOpenedArticle } from './constants';
 import { AutoSaveQueue } from '../lib/autosave';
 import { splitArticle } from '../lib/article';
 import { isMarkdown, isText } from '../lib/files';
@@ -24,6 +24,7 @@ export function useWorkspaceController(enabled = true) {
   const [auth, setAuth] = useState<GitHubConnection | null>(null);
   const [repository, setRepository] = useState<string | null>(null);
   const [files, setFiles] = useState<NoteSummary[]>([]);
+  const [recentArticles, setRecentArticles] = useState<NoteSummary[]>([]);
   const [folders, setFolders] = useState<string[]>([]);
   const [selected, setSelected] = useState<NoteSummary | null>(null);
   const [note, setNote] = useState<Note | null>(null);
@@ -160,8 +161,9 @@ export function useWorkspaceController(enabled = true) {
     }
 
     const workspaceKey = options.workspaceKey ?? (repositoryRef.current ? workspaceKeyFor(repositoryRef.current) : null);
-    if (isMarkdown(file.path)) {
-      localStorage.setItem(lastArticleKey, file.path);
+    if (isMarkdown(file.path) && repositoryRef.current) {
+      rememberOpenedArticle(repositoryRef.current, file.path);
+      setRecentArticles((current) => [file, ...current.filter((item) => item.path !== file.path)].slice(0, 6));
     }
 
     const cached = workspaceKey ? await readCachedDocument(workspaceKey, file.path) : undefined;
@@ -227,6 +229,10 @@ export function useWorkspaceController(enabled = true) {
       if (nextTree.files) {
         setFiles(nextTree.files);
         setFolders(nextTree.folders ?? []);
+        const recentPaths = recentArticlePaths(config.repository);
+        setRecentArticles(recentPaths
+          .map((path) => nextTree.files.find((file) => file.path === path && isMarkdown(file.path)))
+          .filter((file): file is NoteSummary => Boolean(file)));
         const current = selectedRef.current;
         const preserveCurrentDocument = options.preserveCurrentDocument === true;
         if (current && !preserveCurrentDocument) {
@@ -242,9 +248,9 @@ export function useWorkspaceController(enabled = true) {
             setSelected(refreshed);
           }
         } else if (!current) {
-          const lastPath = localStorage.getItem(lastArticleKey);
-          const lastArticle = lastPath ? nextTree.files.find((file) => file.path === lastPath && isMarkdown(file.path)) : undefined;
-          if (lastArticle) void loadFile(lastArticle, { workspaceKey });
+          const activePath = activeArticlePath(config.repository);
+          const activeArticle = activePath ? nextTree.files.find((file) => file.path === activePath && isMarkdown(file.path)) : undefined;
+          if (activeArticle) void loadFile(activeArticle, { workspaceKey });
         }
       }
       setError(null);
@@ -266,6 +272,7 @@ export function useWorkspaceController(enabled = true) {
     setRepository(null);
     repositoryRef.current = null;
     setFiles([]);
+    setRecentArticles([]);
     setFolders([]);
     setSelected(null);
     selectedRef.current = null;
@@ -486,6 +493,7 @@ export function useWorkspaceController(enabled = true) {
       repositoryRef.current = result.repository;
       setSync(result.sync);
       setFiles([]);
+      setRecentArticles([]);
       setFolders([]);
       selectedRef.current = null;
       setSelected(null);
@@ -538,6 +546,11 @@ export function useWorkspaceController(enabled = true) {
         await notesApi.remove(selected.path, note.revision, selected.id);
       }
       setSheetOpen(false);
+      const currentRepository = repositoryRef.current;
+      if (currentRepository) {
+        forgetOpenedArticle(currentRepository, selected.path);
+        setRecentArticles((current) => current.filter((file) => file.path !== selected.path));
+      }
       selectedRef.current = null;
       setSelected(null);
       setNote(null);
@@ -598,6 +611,7 @@ export function useWorkspaceController(enabled = true) {
     auth,
     repository,
     files,
+    recentArticles,
     folders,
     selected,
     note,

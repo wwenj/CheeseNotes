@@ -1,9 +1,10 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { BookOpen, Check, Copy, FilePlus2, FolderOpen, Heart, LoaderCircle, MoreHorizontal, PencilLine, Trash2, TriangleAlert } from 'lucide-react';
+import { ArrowUpRight, BookOpen, Check, CircleAlert, CircleCheckBig, Clock3, Copy, FilePlus2, FileText, Heart, LoaderCircle, MoreHorizontal, PencilLine, RefreshCw, Trash2, TriangleAlert } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { Note, NoteSummary } from '../../api';
-import { displayName, isMarkdown, isText } from '../../lib/files';
+import type { Note, NoteSummary, SyncStatus } from '../../api';
+import { formatLastSync, isSyncBusy, stateText } from '../../app/constants';
+import { displayName, isMarkdown, isText, treeTitle } from '../../lib/files';
 import { splitArticle } from '../../lib/article';
 import AssetViewer from '../../components/AssetViewer';
 import MarkdownRenderer from '../../components/MarkdownRenderer';
@@ -13,14 +14,51 @@ type DocumentViewProps = {
   selected: NoteSummary | null;
   note: Note | null;
   files: NoteSummary[];
+  recentArticles?: NoteSummary[];
+  sync?: SyncStatus | null;
   loading: boolean;
   readerFontSize: number;
   onOpen: (path: string) => void;
   onNew: () => void;
 };
 
-export const DocumentView = memo(function DocumentView({ selected, note, files, loading, readerFontSize, onOpen, onNew }: DocumentViewProps) {
-  if (!selected && !loading) return <div className="document-empty"><div><FolderOpen size={27} /><h1>打开一个文件</h1><p>从文件列表选择笔记、PDF 或其他附件。</p><button type="button" className="accent-button" onClick={onNew}><FilePlus2 size={16} />新建笔记</button></div></div>;
+function WelcomeView({ files, recentArticles, sync, onOpen, onNew }: Pick<DocumentViewProps, 'files' | 'recentArticles' | 'sync' | 'onOpen' | 'onNew'>) {
+  const noteCount = files.filter((file) => isMarkdown(file.path)).length;
+  const conflict = sync?.syncBlockedByConflicts || sync?.state === 'conflict';
+  const syncing = isSyncBusy(sync ?? null);
+  const syncLabel = conflict ? `${sync?.conflictCount ?? 0} 个冲突待处理` : stateText[sync?.state ?? 'unconfigured'];
+  const syncDetail = conflict ? '请在同步页处理' : formatLastSync(sync?.lastSuccessAt ?? '');
+  const SyncIcon = conflict ? CircleAlert : syncing ? RefreshCw : CircleCheckBig;
+
+  return <section className="welcome-view" aria-labelledby="welcome-title">
+    <div className="welcome-surface">
+      <header className="welcome-summary">
+        <div className="welcome-intro">
+          <span className="welcome-mark"><BookOpen size={21} /></span>
+          <h1 id="welcome-title">现在，写点什么。</h1>
+          <p>从下面继续，或新建一篇笔记。</p>
+          <button type="button" className="accent-button" onClick={onNew}><FilePlus2 size={16} />新建笔记</button>
+        </div>
+        <dl className="welcome-stats">
+          <div><dt>笔记</dt><dd>{noteCount}<small>篇</small></dd></div>
+          <div className={`welcome-sync ${conflict ? 'is-conflict' : sync?.state === 'failed' ? 'is-failed' : syncing ? 'is-busy' : 'is-ready'}`}>
+            <dt>同步</dt><dd><SyncIcon className={syncing ? 'spin' : ''} size={16} /><span>{syncLabel}</span></dd><small>{syncDetail}</small>
+          </div>
+        </dl>
+      </header>
+      <section className="welcome-recent" aria-label="最近访问的笔记">
+      {recentArticles?.length
+        ? <div className="welcome-recent-list">{recentArticles.map((file) => <button type="button" key={file.path} className="welcome-note" onClick={() => onOpen(file.path)}>
+          <FileText size={17} /><span><strong>{treeTitle(file)}</strong><small>{file.path}</small></span><ArrowUpRight size={16} />
+        </button>)}</div>
+        : <p className="welcome-recent-empty"><Clock3 size={16} />还没有打开过笔记。新建第一篇开始吧。</p>}
+      </section>
+    </div>
+  </section>;
+}
+
+export const DocumentView = memo(function DocumentView({ selected, note, files, recentArticles, sync, loading, readerFontSize, onOpen, onNew }: DocumentViewProps) {
+  if (!selected && !loading) return <WelcomeView files={files} recentArticles={recentArticles} sync={sync} onOpen={onOpen} onNew={onNew} />;
   if (loading && !note) return <div className="document-loading" role="status" aria-label="正在加载"><LoaderCircle className="spin" size={20} /></div>;
   if (!selected) return null;
   if (isMarkdown(selected.path) && note) {
