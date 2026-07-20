@@ -20,7 +20,7 @@ async function git(cwd: string, ...args: string[]) {
   return (await execute('git', args, { cwd })).stdout.trim();
 }
 
-async function fixture(options: { empty?: boolean } = {}) {
+async function fixture(options: { empty?: boolean; repositoryError?: Error } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'noteai-git-test-'));
   roots.push(root);
   const remote = join(root, 'remote.git');
@@ -53,14 +53,17 @@ async function fixture(options: { empty?: boolean } = {}) {
     accessToken: () => 'integration-test-token',
     login: () => 'noteai-test',
     accountId: () => '100',
-    repository: async () => ({ full_name: 'owner/notes', default_branch: 'main', permissions: { push: true } }),
+    repository: async () => {
+      if (options.repositoryError) throw options.repositoryError;
+      return { full_name: 'owner/notes', default_branch: 'main', permissions: { push: true } };
+    },
     cloneUrl: () => remote,
   } as unknown as GitHubService;
   const sync = new SyncService(database, paths, repository, github, processGit, workspace);
   const notes = new NoteService(database, paths, workspace, sync);
   await sync.selectRepository('owner/notes');
-  await waitFor(sync, (status) => status.state === 'verified' || status.state === 'failed');
-  expect(sync.status().lastError).toBe('');
+  await waitFor(sync, (status) => status.state === 'verified' || status.phase === 'failed');
+  if (!options.repositoryError) expect(sync.status().lastError).toBe('');
   return { root, remote, data, database, paths, processGit, workspace, repository, github, sync, notes };
 }
 
@@ -79,6 +82,20 @@ afterEach(async () => {
 });
 
 describe('真实 Git working tree', () => {
+  it('首次克隆初始化失败时暴露错误并清除仓库绑定，不保留 cloning 假状态', async () => {
+    const { database, repository, sync, workspace } = await fixture({ repositoryError: new Error('GitHub 仓库元数据请求失败') });
+
+    expect(sync.status()).toMatchObject({
+      state: 'unconfigured',
+      phase: 'failed',
+      lastError: 'GitHub 仓库元数据请求失败',
+      manualSyncAvailable: false,
+    });
+    expect(repository.get()).toBe('');
+    expect(workspace.exists()).toBe(false);
+    database.db.close();
+  });
+
   it('重置会清空本地工作区和仓库绑定，等待重新选择', async () => {
     const { database, repository, sync, workspace } = await fixture();
     await writeFile(join(workspace.root, '中断的本地文件.md'), '# 临时内容');

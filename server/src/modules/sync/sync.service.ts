@@ -153,7 +153,7 @@ export class SyncService implements OnModuleInit {
     }
     const repository = this.repository.set(value);
     this.setState({ state: 'checking', phase: 'cloning', last_error: '' });
-    void this.exclusive(() => this.initialize()).catch(() => undefined);
+    void this.exclusive(() => this.initialize()).catch((reason) => this.fail(reason));
     return { repository, sync: this.status() };
   }
 
