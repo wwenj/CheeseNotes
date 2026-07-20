@@ -3,12 +3,14 @@
     "clientId": "填写本地 OAuth App Client ID",
     "clientSecret": "填写本地 OAuth App Client Secret",
     "authorizationCallbackUrl": "http://localhost:3000/api/auth/github/callback",
-    "homepageUrl": "http://localhost:5173"
+    "homepageUrl": "http://localhost:5173",
+    "gitTransport": "https"
   },
   "production": {
     "clientId": "填写生产 OAuth App Client ID",
     "clientSecret": "填写生产 OAuth App Client Secret",
     "authorizationCallbackUrl": "https://note.wwenj.com/api/auth/github/callback",
-    "homepageUrl": "https://note.wwenj.com"
+    "homepageUrl": "https://note.wwenj.com",
+    "gitTransport": "ssh"
   }
 }

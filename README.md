@@ -10,6 +10,8 @@ npm run start:dev
 
 GitHub OAuth 凭据仅保存在 `server/config/github-oauth.local.json`，该文件被 Git 忽略。首次部署时从 `server/config/github-oauth.example.json` 复制并填写本地、生产两套 OAuth App 信息；客户端只需点击连接 GitHub，不需要也不会接触 Client Secret。GitHub OAuth App 的 Authorization callback URL 分别使用配置文件中的 `authorizationCallbackUrl`。
 
+每个环境在同一份配置中通过 `gitTransport` 选择 Git remote：`https`（默认）使用 OAuth token，`ssh` 使用部署机 SSH key 和 `git@github.com:owner/repo.git`。OAuth 仍只用于 GitHub API 的仓库读取和授权校验。
+
 服务端会完整 clone 绑定时的 GitHub 默认分支，真实 Git working tree 是文本、图片、PDF 和音视频的唯一服务端内容副本。保存先原子写入 working tree，随后由单一同步协调器通过标准 `fetch/add/commit/cherry-pick/push` 完成 fast-forward 同步，并以远端 ref 验证结果；未验证前不会显示“已同步”。SQLite 只保存索引、仓库状态、任务、冲突元数据、设置和凭据，不保存文件正文。
 
 本地开发数据默认位于仓库根目录 `.runtime`，Docker 内固定为 `/var/lib/note-service`：

@@ -1,17 +1,21 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+type GitTransport = 'https' | 'ssh';
+
 type GitHubOAuthSettings = {
   clientId: string;
   clientSecret: string;
   authorizationCallbackUrl: string;
   homepageUrl: string;
+  gitTransport?: GitTransport;
 };
 
 type GitHubOAuthSettingsFile = Record<'development' | 'production', GitHubOAuthSettings>;
 
 export type RuntimeConfig = {
   dataRoot: string;
+  gitTransport: GitTransport;
   serviceDir: string;
   port: number;
   host: string;
@@ -23,6 +27,12 @@ export type RuntimeConfig = {
 };
 
 const githubOAuthConfigPath = () => resolve(process.cwd(), 'config', 'github-oauth.local.json');
+
+const gitTransport = (settings: GitHubOAuthSettings, environment: string): GitTransport => {
+  const value = settings.gitTransport ?? 'https';
+  if (value === 'https' || value === 'ssh') return value;
+  throw new Error(`GitHub OAuth ${environment} 配置中的 gitTransport 只能是 https 或 ssh。`);
+};
 
 const requiredSetting = (settings: GitHubOAuthSettings, key: keyof GitHubOAuthSettings, environment: string) => {
   const value = settings[key];
@@ -63,6 +73,7 @@ const githubOAuthSettings = (): GitHubOAuthSettings => {
     clientSecret: requiredSetting(settings, 'clientSecret', environment),
     authorizationCallbackUrl,
     homepageUrl,
+    gitTransport: gitTransport(settings, environment),
   };
 };
 
@@ -74,6 +85,7 @@ export const runtimeConfig = (): RuntimeConfig => {
     dataRoot: process.env.NOTEAI_DATA_ROOT
       ? resolve(process.env.NOTEAI_DATA_ROOT)
       : existsSync('/.dockerenv') ? '/var/lib/note-service' : resolve(process.cwd(), '..', '.runtime'),
+    gitTransport: oauth.gitTransport ?? 'https',
     serviceDir: 'note-service',
     port: Number(process.env.PORT || 3000),
     host: process.env.HOST || '0.0.0.0',

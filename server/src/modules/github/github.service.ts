@@ -1,6 +1,7 @@
 import { BadRequestException, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { getSetting, setSetting } from '../../common/database-settings.js';
 import { wait } from '../../common/time.js';
+import { runtimeConfig } from '../../config/runtime.config.js';
 import { DatabaseService } from '../database/database.service.js';
 import type { RepoMeta } from './contracts/github.types.js';
 
@@ -56,6 +57,7 @@ export class GitHubService {
   }
 
   cloneUrl(fullName: string) {
+    if (runtimeConfig().gitTransport === 'ssh') return `git@github.com:${fullName}.git`;
     return `https://github.com/${fullName}.git`;
   }
 
