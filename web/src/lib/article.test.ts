@@ -59,6 +59,14 @@ describe('live preview lists', () => {
     const content = '- 项目\n\n正文';
     expect(markdownMarkerRanges(content, 0, content.indexOf('\n'))).toEqual([]);
   });
+
+  it('never includes a line break in an unfinished list marker', () => {
+    const content = '- 列表 1\n- \n';
+    const ranges = markdownMarkerRanges(content, 0, 0);
+    expect(ranges.map(({ from, to }) => content.slice(from, to))).toEqual(['- ', '- ']);
+    expect(ranges.every(({ from, to }) => !content.slice(from, to).includes('\n'))).toBe(true);
+    expect(listMarkerForLine('- ')).toMatchObject({ kind: 'unordered', from: 0, to: 2 });
+  });
 });
 
 describe('live preview images', () => {

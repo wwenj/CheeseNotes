@@ -117,7 +117,7 @@ export function imagePreviewForLine(line: string, sourcePath: string, files: Not
 }
 
 export function listMarkerForLine(line: string): LiveListMarker | null {
-  const match = line.match(/^([ \t]*)(?:([-*+])\s+(\[([ xX])\]\s+)?|(\d+)[.)]\s+)/);
+  const match = line.match(/^([ \t]*)(?:([-*+])[ \t]+(\[([ xX])\][ \t]+)?|(\d+)[.)][ \t]+)/);
   if (!match) return null;
 
   const indentation = match[1].replace(/\t/g, '    ').length;
@@ -227,7 +227,10 @@ function markdownSyntaxRanges(content: string) {
   const ranges: MarkerRange[] = [];
   const add = (from: number, to: number) => addRange(ranges, from, to);
 
-  const linePattern = /^(\s*)(#{1,6}\s+|(?:[-*+]\s+(?:\[[ xX]\]\s+)?)|(?:\d+[.)]\s+)|>\s?)/gm;
+  // Do not use \s here: it also matches line breaks. ViewPlugin decorations
+  // are forbidden from replacing a line break, which made a trailing "- "
+  // list item crash the editor.
+  const linePattern = /^([ \t]*)(#{1,6}[ \t]+|(?:[-*+][ \t]+(?:\[[ xX]\][ \t]+)?)|(?:\d+[.)][ \t]+)|>[ \t]?)/gm;
   for (const match of content.matchAll(linePattern)) add(match.index! + match[1].length, match.index! + match[0].length);
 
   for (const match of content.matchAll(/(`{1,3})/g)) add(match.index!, match.index! + match[0].length);
@@ -269,7 +272,7 @@ function imageLines(state: EditorState, sourcePath: string, files: NoteSummary[]
 function visibleMarkerFor(value: string) {
   const heading = value.match(/^(#{1,6})\s+$/);
   if (heading) return visibleHeadingMarkers[heading[1].length - 1];
-  if (/^(?:[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+)$/.test(value)) return visibleListMarker;
+  if (/^(?:[-*+][ \t]+(?:\[[ xX]\][ \t]+)?|\d+[.)][ \t]+)$/.test(value)) return visibleListMarker;
   if (value === '**' || value === '__') return visibleStrongMarker;
   if (value === '*' || value === '_') return visibleEmphasisMarker;
   if (value === '~~') return visibleStrikethroughMarker;
