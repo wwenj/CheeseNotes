@@ -85,6 +85,9 @@ export const stateText: Record<SyncStatus['state'], string> = {
 
 export const phaseText: Record<SyncStatus['phase'], string> = {
   idle: '等待开始',
+  'checking-repository': '确认仓库权限',
+  'checking-remote': '读取远端分支',
+  'preparing-workspace': '准备本地工作区',
   cloning: '克隆完整 Git 仓库',
   fetching: '读取 GitHub 版本',
   merging: '合并远端修改',

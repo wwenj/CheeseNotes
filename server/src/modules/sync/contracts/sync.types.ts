@@ -1,5 +1,5 @@
 export type SyncState = 'unconfigured' | 'unauthorized' | 'checking' | 'pending' | 'syncing' | 'verified' | 'conflict' | 'failed';
-export type SyncPhase = 'idle' | 'cloning' | 'fetching' | 'merging' | 'committing' | 'pushing' | 'verifying' | 'completed' | 'failed';
+export type SyncPhase = 'idle' | 'checking-repository' | 'checking-remote' | 'preparing-workspace' | 'cloning' | 'fetching' | 'merging' | 'committing' | 'pushing' | 'verifying' | 'completed' | 'failed';
 
 export type RepositoryStateRow = {
   repository: string;
@@ -27,6 +27,7 @@ export type SyncStatus = {
   verifiedGeneration: number;
   remoteHead: string;
   verifiedAt: string;
+  activityStartedAt: string;
   lastError: string;
   manualSyncAvailable: boolean;
 };

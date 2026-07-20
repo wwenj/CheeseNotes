@@ -66,6 +66,7 @@ export class SyncService implements OnModuleInit {
       verifiedGeneration: row.verified_generation,
       remoteHead: row.remote_head,
       verifiedAt: row.verified_at,
+      activityStartedAt: row.updated_at,
       lastError: row.last_error,
       manualSyncAvailable: !this.active && this.writes === 0 && Boolean(row.repository) && this.github.hasToken() && !conflictCount,
     };
@@ -152,7 +153,7 @@ export class SyncService implements OnModuleInit {
       throw new ConflictException({ code: 'LOCAL_CHANGES', message: '当前仓库存在未同步修改或未处理冲突，不能切换仓库' });
     }
     const repository = this.repository.set(value);
-    this.setState({ state: 'checking', phase: 'cloning', last_error: '' });
+    this.setState({ state: 'checking', phase: 'checking-repository', last_error: '' });
     void this.exclusive(() => this.initialize()).catch((reason) => this.fail(reason));
     return { repository, sync: this.status() };
   }
@@ -264,7 +265,7 @@ export class SyncService implements OnModuleInit {
     if (!fullName) return;
     const token = this.github.accessToken();
     try {
-      this.setState({ state: 'checking', phase: 'cloning', last_error: '' });
+      this.setState({ state: 'checking', phase: 'checking-repository', last_error: '' });
       const meta = await this.github.repository(fullName);
       const storedBranch = this.repository.branch();
       if (storedBranch && storedBranch !== meta.default_branch) {
@@ -272,9 +273,12 @@ export class SyncService implements OnModuleInit {
       }
       const branch = storedBranch || meta.default_branch || 'main';
       const cloneUrl = this.github.cloneUrl(fullName);
+      this.setState({ state: 'checking', phase: 'checking-remote' });
       const remoteHead = await this.lsRemoteUrl(cloneUrl, branch, token);
+      this.setState({ state: 'checking', phase: 'preparing-workspace' });
       await this.workspace.clear();
       if (remoteHead) {
+        this.setState({ state: 'checking', phase: 'cloning' });
         await this.git.run(['clone', '--single-branch', '--no-tags', '--branch', branch, '--', cloneUrl, this.workspace.root], { cwd: this.workspace.jobsRoot, token, timeout: cloneTimeout });
       } else {
         await fs.mkdir(this.workspace.root, { recursive: true });

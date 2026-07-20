@@ -116,10 +116,13 @@ export function RepositoryPicker({ onSelect, compact = false }: { onSelect: (val
 }
 
 export function InitializationProgress({ sync, onRetry }: { sync: SyncStatus; onRetry: () => Promise<void> }) {
-  const phaseOrder: SyncStatus['phase'][] = ['cloning', 'fetching', 'merging', 'committing', 'pushing', 'verifying'];
+  const phaseOrder: SyncStatus['phase'][] = ['checking-repository', 'checking-remote', 'preparing-workspace', 'cloning', 'completed'];
   const currentStep = Math.max(0, phaseOrder.indexOf(sync.phase));
   const phaseDetail: Record<SyncStatus['phase'], string> = {
     idle: '正在准备同步',
+    'checking-repository': '正在确认 GitHub 仓库存在且具有写入权限',
+    'checking-remote': '正在读取默认分支的远端 Git ref',
+    'preparing-workspace': '正在清理并准备本地 Git 工作区',
     cloning: '正在克隆仓库默认分支',
     fetching: '正在读取 GitHub 最新版本',
     merging: '正在合并本地与远端修改',
@@ -130,11 +133,10 @@ export function InitializationProgress({ sync, onRetry }: { sync: SyncStatus; on
     failed: '同步未完成',
   };
   const steps = [
-    ['cloning', '克隆仓库'],
-    ['fetching', '读取远端版本'],
-    ['merging', '合并修改'],
-    ['pushing', '推送提交'],
-    ['verifying', '验证 GitHub ref'],
+    ['checking-repository', '确认仓库权限'],
+    ['checking-remote', '读取远端分支'],
+    ['preparing-workspace', '准备本地工作区'],
+    ['cloning', '克隆仓库文件'],
   ] as const;
 
   return <section className="setup-card progress-card">
