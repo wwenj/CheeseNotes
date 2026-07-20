@@ -33,7 +33,6 @@ export class AuthController {
     if (error || !code || !state) return reply.code(302).redirect(this.redirect(base, 'error', error || '授权被取消'));
     try {
       await this.oauth.finishRepositoryConnection(code, state);
-      this.sync.triggerInitialize();
       return reply.code(302).redirect(this.redirect(base, 'connected'));
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : 'GitHub 授权失败';

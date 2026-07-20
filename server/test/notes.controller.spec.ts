@@ -31,4 +31,16 @@ describe('note tree', () => {
 
     expect(notes.tree).toHaveBeenCalledOnce();
   });
+
+  it('exposes an isolated management snapshot and forwards atomic changes', async () => {
+    const management = { ...tree, treeVersion: 'tree-v1' };
+    const result = { ...management, sync: { state: 'pending' } };
+    const notes = { managementTree: vi.fn(async () => management), applyTreeChanges: vi.fn(async () => result) } as unknown as NoteService;
+    const controller = new NotesController(notes);
+    const operations = [{ type: 'move-folder', fromPath: '收件箱', toPath: '归档/收件箱' }];
+
+    await expect(controller.managementTree()).resolves.toEqual(management);
+    await expect(controller.treeChanges({ baseTreeVersion: 'tree-v1', operations })).resolves.toEqual(result);
+    expect(notes.applyTreeChanges).toHaveBeenCalledWith('tree-v1', operations);
+  });
 });

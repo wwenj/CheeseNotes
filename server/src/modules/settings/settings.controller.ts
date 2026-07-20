@@ -23,7 +23,6 @@ export class SettingsController {
   @Put('repository')
   @HttpCode(202)
   setRepository(@Body() dto: RepositoryDto) {
-    const repository = this.repository.set(dto.repository);
-    return { repository, sync: this.sync.triggerInitialize() };
+    return this.sync.selectRepository(dto.repository);
   }
 }

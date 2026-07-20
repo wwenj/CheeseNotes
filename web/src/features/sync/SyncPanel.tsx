@@ -62,8 +62,8 @@ export default function SyncPanel({ sync, onSync, onSyncStatus, onRefresh, onErr
       setBulkAction('keep-both');
       return;
     }
-    if (sync?.syncBlockedByConflicts && sync.conflictCount !== total) void loadList(true);
-  }, [loadList, sync?.conflictCount, sync?.syncBlockedByConflicts, total]);
+    if (sync?.state === 'conflict' && sync.conflictCount !== total) void loadList(true);
+  }, [loadList, sync?.conflictCount, sync?.state, total]);
 
   const loadDetail = async (id: string) => {
     if (details[id] || loadingDetail === id) return;
@@ -93,7 +93,6 @@ export default function SyncPanel({ sync, onSync, onSyncStatus, onRefresh, onErr
           return;
         }
         setItems((current) => current.map((currentItem) => currentItem.id === item.id ? { ...currentItem, resolution_action: action, resolution_copy_path: result.conflict.resolution_copy_path } : currentItem));
-        setDraftCount((current) => Math.max(current, result.sync.resolutionDraftCount));
       } catch (reason) {
         setItems((current) => current.map((currentItem) => currentItem.id === item.id ? item : currentItem));
         if (wasUndecided) setDraftCount((current) => Math.max(0, current - 1));

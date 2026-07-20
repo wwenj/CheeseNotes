@@ -24,6 +24,7 @@ const assetContentTypes: Record<string, string> = {
 
 async function bootstrap() {
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter({ logger: true }), { rawBody: true });
+  app.enableShutdownHooks();
   app.setGlobalPrefix('api');
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true }));
   const config = runtimeConfig();

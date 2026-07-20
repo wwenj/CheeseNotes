@@ -1,32 +1,32 @@
 export type SyncState = 'unconfigured' | 'unauthorized' | 'checking' | 'pending' | 'syncing' | 'verified' | 'conflict' | 'failed';
-export type SyncPhase = 'idle' | 'fetching' | 'merging' | 'committing' | 'verifying' | 'completed' | 'failed';
+export type SyncPhase = 'idle' | 'cloning' | 'fetching' | 'merging' | 'committing' | 'pushing' | 'verifying' | 'completed' | 'failed';
 
-export type NoteRow = {
-  id: string;
-  path: string;
-  revision: string;
-  updated_at: string;
-  title: string | null;
-  content: string | null;
-  remote_path: string | null;
-  remote_sha: string | null;
-  base_content: string | null;
-  dirty: number;
-  deleted: number;
-};
-
-export type WorkspaceRow = {
+export type RepositoryStateRow = {
+  repository: string;
+  branch: string;
+  local_head: string;
+  remote_head: string;
   generation: number;
   verified_generation: number;
-  last_remote_head: string;
-  verified_remote_head: string;
-  verified_at: string;
+  dirty_count: number;
   state: SyncState;
   phase: SyncPhase;
   last_error: string;
-  next_retry_at: string;
-  lock_token: string;
-  lock_until: string;
+  verified_at: string;
   device_id: string;
+  lock_token: string;
   updated_at: string;
+};
+
+export type SyncStatus = {
+  state: SyncState;
+  phase: SyncPhase;
+  dirtyCount: number;
+  conflictCount: number;
+  generation: number;
+  verifiedGeneration: number;
+  remoteHead: string;
+  verifiedAt: string;
+  lastError: string;
+  manualSyncAvailable: boolean;
 };

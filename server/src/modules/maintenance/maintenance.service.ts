@@ -12,9 +12,9 @@ export class MaintenanceService {
     return { confirmationId: this.token, ...this.sync.status() };
   }
 
-  execute(confirmationId: string) {
+  async execute(confirmationId: string) {
     if (!this.token || confirmationId !== this.token) return { ok: false };
     this.token = '';
-    return { ok: true, ...this.sync.reset() };
+    return { ok: true, ...(await this.sync.reset()) };
   }
 }

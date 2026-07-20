@@ -6,8 +6,12 @@ import { runtimeConfig } from '../../config/runtime.config.js';
 @Injectable()
 export class PathPolicy {
   private normalized(path: string) {
-    if (typeof path !== 'string' || path.includes('\\')) throw new BadRequestException('非法笔记路径');
-    return normalize(path).replace(/^\/+/, '').replace(/\/$/, '');
+    if (typeof path !== 'string' || path.includes('\\') || path.startsWith('/') || /[\u0000-\u001f\u007f]/.test(path)) {
+      throw new BadRequestException('非法笔记路径');
+    }
+    const value = path.replace(/\/+$/, '');
+    if (value.split('/').some((part) => !part || part === '.' || part === '..')) throw new BadRequestException('非法笔记路径');
+    return normalize(value);
   }
 
   private assertSafeDirectoryPath(path: string) {

@@ -41,6 +41,9 @@ importers:
       sanitize-html:
         specifier: ^2.17.0
         version: 2.17.6
+      simple-git:
+        specifier: ^3.36.0
+        version: 3.36.0
     devDependencies:
       '@nestjs/testing':
         specifier: ^11.1.28
@@ -268,6 +271,12 @@ packages:
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha1-aRKwDSxjHA0Vzhp6tXzWV/Ko+Lo=}
 
+  '@kwsites/file-exists@1.1.1':
+    resolution: {integrity: sha1-rR78rBPhmH2NuvI17zvlsNlvqpk=}
+
+  '@kwsites/promise-deferred@1.1.1':
+    resolution: {integrity: sha1-is5SWSVEJszvV/MXW8ZO1wle2Rk=}
+
   '@lukeed/csprng@1.1.0':
     resolution: {integrity: sha1-Hj5L0Fwcx6Cy3b2KA/OfbktebP4=}
     engines: {node: '>=8'}
@@ -473,6 +482,12 @@ packages:
     resolution: {integrity: sha1-NnHOP5uSjVwB+Hl5LVwLYK4U1K0=}
     cpu: [x64]
     os: [win32]
+
+  '@simple-git/args-pathspec@1.0.3':
+    resolution: {integrity: sha1-nvSirV9Jq0BWNi0D+T93W5MRjKU=}
+
+  '@simple-git/argv-parser@1.1.1':
+    resolution: {integrity: sha1-J1uDnG7rUDCHLHOx6oOaQWiF2p0=}
 
   '@tokenizer/inflate@0.4.1':
     resolution: {integrity: sha1-+mzbg2YVGzzIQmv5dVweoDovugg=}
@@ -1093,6 +1108,9 @@ packages:
   simple-get@4.0.1:
     resolution: {integrity: sha1-SjnbVJKHyXnTUhEvoD/Zn9a8NUM=}
 
+  simple-git@3.36.0:
+    resolution: {integrity: sha1-AZsowKNYR+40KZxvtjdwqxst/7c=}
+
   sonic-boom@4.2.1:
     resolution: {integrity: sha1-KFmCUN9ImcCsVy1+LwRgaQumoDA=}
 
@@ -1434,6 +1452,14 @@ snapshots:
 
   '@jridgewell/sourcemap-codec@1.5.5': {}
 
+  '@kwsites/file-exists@1.1.1':
+    dependencies:
+      debug: 4.4.3
+    transitivePeerDependencies:
+      - supports-color
+
+  '@kwsites/promise-deferred@1.1.1': {}
+
   '@lukeed/csprng@1.1.0': {}
 
   '@lukeed/ms@2.0.2': {}
@@ -1563,6 +1589,12 @@ snapshots:
 
   '@rollup/rollup-win32-x64-msvc@4.62.2':
     optional: true
+
+  '@simple-git/args-pathspec@1.0.3': {}
+
+  '@simple-git/argv-parser@1.1.1':
+    dependencies:
+      '@simple-git/args-pathspec': 1.0.3
 
   '@tokenizer/inflate@0.4.1':
     dependencies:
@@ -2230,6 +2262,16 @@ snapshots:
       decompress-response: 6.0.0
       once: 1.4.0
       simple-concat: 1.0.1
+
+  simple-git@3.36.0:
+    dependencies:
+      '@kwsites/file-exists': 1.1.1
+      '@kwsites/promise-deferred': 1.1.1
+      '@simple-git/args-pathspec': 1.0.3
+      '@simple-git/argv-parser': 1.1.1
+      debug: 4.4.3
+    transitivePeerDependencies:
+      - supports-color
 
   sonic-boom@4.2.1:
     dependencies:

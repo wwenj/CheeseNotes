@@ -1,82 +1,87 @@
 # Server architecture
 
-当前服务采用“模块化单体 + Controller / Service / Store / Contract”结构。基础接口路径和成功响应保持现有 Web、iOS 客户端兼容，内部实现按领域重新组装。
+服务端是 NestJS/Fastify 模块化单体。真实 Git working tree 是唯一文件内容工作副本；GitHub 是远端；SQLite 只保存可重建索引和协调元数据。
 
-## 目录分层
-
-```text
-src/
-├── main.ts                         # Fastify/Nest bootstrap、全局前缀和校验管道
-├── app.module.ts                   # 只负责模块组装
-├── config/                         # 端口、数据根目录、OAuth 回调等运行时配置
-├── common/                         # hash、时间、文件类型、SQLite settings 小工具
-└── modules/
-    ├── database/                   # SQLite 连接、schema 初始化和 settings
-    ├── storage/                    # 路径安全策略和笔记文件存储
-    ├── github/                     # GitHub API client 和仓库列表接口
-    ├── auth/                       # Authenticator 设备验证与 GitHub 仓库授权
-    ├── settings/                   # 当前仓库及分支设置
-    │   └── settings-api.module.ts  # 设置 HTTP API 组装层
-    ├── notes/                      # 笔记读取、编辑、渲染、搜索和资源文件
-    ├── sync/                       # 初始化、增量同步、任务状态和冲突处理
-    ├── maintenance/                # 重置确认流程
-    └── health/                     # 健康检查
-```
-
-每个业务模块的约定：
-
-- `*.module.ts`：声明模块边界和导出能力。
-- `*.controller.ts`：只处理 HTTP 路由、参数和响应适配。
-- `*.service.ts`：承载业务流程和领域规则。
-- `contracts/`：DTO、状态类型和外部协议类型。
-- `storage/`、`database/`：隔离文件系统和 SQLite 细节。
-- 所有构造函数依赖均显式标注 `@Inject(...)`，保证 `tsx` 开发启动不依赖 TypeScript 的设计类型元数据。
-
-## 依赖方向
+## 运行目录
 
 ```text
-Auth ───────────────┐
-Notes ──────────────┼──> Sync ───> Settings
-Maintenance ───────┘       ├─────> GitHub
-                            ├─────> Storage
-                            └─────> Database
-SettingsApi ────────────────> Sync
-Notes ───────────────────────> Storage / Database
+/var/lib/note-service/
+├── meta/noteai-git.sqlite
+├── repository/                 # 完整默认分支和 .git
+└── git-jobs/                   # snapshot ref、冲突三方文件和恢复状态
 ```
 
-同步模块不依赖 `NoteService`，直接读取 SQLite 的 `notes.dirty/deleted` 作为唯一持久任务，并通过 GitHub Git Data API 创建原子 commit、回读 tree 与内容验证。`FileStoreService` 只用于媒体资源缓存和旧数据迁移，不能决定同步状态；笔记服务在同一 SQLite 事务内保存内容、revision 与 generation，再触发 `SyncService.schedule()`。
+本地开发可通过 `NOTEAI_DATA_ROOT` 覆盖目录，默认使用仓库根目录 `.runtime`。检测到旧 `meta/notes.sqlite` 时直接拒绝启动，不执行兼容读取或迁移。
 
-## 接口契约
+## 模块边界
 
-全局前缀仍为 `/api`，基础接口成功响应仍为原始 JSON，不新增响应 envelope，以兼容现有客户端；`GET /api/tree?includeFolders=1` 是仅供 Web 使用的扩展树响应。
+- `GitProcessService`：唯一 Git 子进程入口。基于 `simple-git` 设置硬超时、错误分类和受控环境；网络命令通过临时 `GIT_ASKPASS` 读取 token。
+- `RepositoryWorkspaceService`：扫描 working tree、原子写文件、移动/删除、`.gitkeep` 空目录、安全校验和 `file_index` 重建。
+- `SyncService`：仓库独占锁、snapshot commit、fetch/cherry-pick、fast-forward push、远端 ref 验证、冲突落盘和崩溃恢复。
+- `NoteService`：文件 API、revision 并发校验、标题改名和文件树操作预检；不保存正文到 SQLite。
+- `GitHubService`：OAuth、账号、仓库列表、push 权限和默认分支查询；不包含 blob/tree/commit/raw/contents 文件操作。
+- `DatabaseService`：从零创建新 schema，不包含 legacy migration。
+
+依赖方向：
+
+```text
+Notes ───────> Workspace ───────> File system
+  │                │
+  └──────> Sync ───┼──────> GitProcess ───────> system git
+                   ├──────> GitHub metadata API
+                   └──────> SQLite metadata
+```
+
+## SQLite schema
+
+- `file_index(id,path,revision,title,kind,updated_at)`：可从 working tree 重建，不存正文和远端 blob。
+- `repository_state`：固定仓库/分支、local/remote HEAD、generation、verified generation、状态、阶段、锁和错误。
+- `sync_jobs`：任务类型、阶段、base/snapshot/candidate commit、操作清单和错误。
+- `conflicts`：路径、冲突副本、三方 commit、三方临时文件、类型和用户决策。
+- `settings`、`devices`、`github_oauth_states`：设置、设备和 OAuth 元数据。
+
+## Working tree 规则
+
+- 文本保存使用同目录临时文件和原子 rename；Markdown 一级标题改名直接移动真实文件。
+- 图片、PDF、音视频直接从 working tree 流式读取，ETag 使用文件字节 SHA-256 revision。
+- 只展示、读取和 stage 支持的文件以及内部 `.gitkeep`；其他仓库文件完整保留。
+- 不支持文件若在服务端被本地修改，整次同步返回 `UNSUPPORTED_LOCAL_CHANGES`，不会执行 `git add -A`。
+- 符号链接和子模块不展示、不读取；包含不受管理内容的目录禁止整体移动或删除。
+- 空目录用 `.gitkeep` 表示并在文件树隐藏。
+
+## 同步事务
+
+普通同步在仓库锁内执行：
+
+1. 校验默认分支、remote URL、working tree 和可 stage 路径。
+2. 把允许的本地变化提交为 snapshot，并创建 `refs/noteai/jobs/<id>/snapshot`。
+3. `git fetch origin`；远端前进时，以远端 HEAD 为基线 cherry-pick snapshot。
+4. 冲突时从 Git index 的 stage 1/2/3 写出 base/remote/local，主路径采用远端，本地版本生成冲突副本。
+5. `git push origin HEAD:refs/heads/<branch>`，禁止 force push。
+6. 使用 `git ls-remote` 验证远端 ref 等于 candidate，随后重建索引并进入 `verified`。
+7. push 竞争时恢复 snapshot 并自动重试一次；其他失败保留同步前的未提交 working tree，任务阶段和当前 HEAD 用于进程重启恢复。
+
+文件管理确认使用相同锁和 Git 链路，但在任何结构变更前 fetch 并要求远端 HEAD 等于本地基线。原有未提交编辑先形成 snapshot，全部移动/删除在真实 working tree 中执行，再相对 base 压成一个最终 commit。失败恢复 snapshot，结构修改不残留；若远端已前进，则先更新本地基线再返回 `REMOTE_CHANGED`，页面刷新后可直接重新整理。
+
+保存与同步双向互斥；任一方向遇到 working tree 正在写入都立即返回 `423 SYNC_BUSY`。前端 autosave 静默退避重试，不让请求长时间挂起。
+
+## API
+
+全局前缀为 `/api`：
 
 | 模块 | 接口 |
 | --- | --- |
-| Health | `GET /api/health` |
-| Notes | `GET /api/tree`、`GET /api/tree?includeFolders=1`、`GET /api/notes/content`、`GET /api/notes/render`、`GET /api/files`、`GET /api/search` |
-| Notes | `POST /api/notes`、`PUT /api/notes`、`DELETE /api/notes`、`POST /api/folders` |
-| Sync | `GET /api/sync/status`、`POST /api/sync` |
-| Sync | `GET /api/sync/conflicts`、`GET /api/sync/conflicts/:id`、`PUT /api/sync/conflicts/decisions`、`PUT /api/sync/conflicts/:id/decision`、`POST /api/sync/conflicts/apply-decisions` |
-| Settings | `GET /api/settings/repository`、`PUT /api/settings/repository` |
-| GitHub OAuth | `POST /api/auth/github/connect`、`GET /api/auth/github/callback`、`GET /api/auth/github/status`、`DELETE /api/auth/github` |
-| GitHub | `GET /api/github/repositories` |
-| Maintenance | `POST /api/maintenance/reset/prepare`、`POST /api/maintenance/reset/execute` |
+| 文件 | `GET /tree`、`GET /tree/management`、`POST /tree/changes` |
+| 内容 | `GET /notes/content`、`GET /notes/render`、`GET /files`、`GET /search` |
+| 写入 | `POST/PUT/DELETE /notes`、`POST /folders` |
+| 同步 | `GET /sync/status`、`POST /sync`、冲突查询与决策接口 |
+| 仓库 | `GET/PUT /settings/repository`、GitHub OAuth 和仓库列表接口 |
 
-写入类 DTO 使用全局 `ValidationPipe` 的 `transform + whitelist + forbidNonWhitelisted` 校验；笔记写入仍只允许 Markdown，路径安全规则统一由 `PathPolicy` 执行。
+`SyncStatus` 只包含真实状态字段：`state`、`phase`、`dirtyCount`、`conflictCount`、`generation`、`verifiedGeneration`、`remoteHead`、`verifiedAt`、`lastError`、`manualSyncAvailable`。
 
-`GET /api/tree` 保持文件数组响应，供既有 iOS 客户端使用；Web 使用 `includeFolders=1` 获取 `{ files, folders }`。空文件夹只保留在本机存储，不会上传 GitHub；向其中写入文件后，文件会按既有同步流程上传。
+## 部署要求
 
-## 运行时配置
-
-默认行为不变，也可以通过环境变量覆盖：
-
-- `PORT`：HTTP 端口，默认 `3000`。
-- `HOST`：监听地址，默认 `0.0.0.0`。
-- `WEB_ORIGIN`：OAuth 成功或失败后的 Web 跳转地址，默认 `http://localhost:5173`。
-- `GITHUB_OAUTH_CALLBACK_URL`：GitHub OAuth 回调地址，默认 `http://127.0.0.1:3000/api/auth/github/callback`。
-
-编译产物入口为 `dist/src/main.js`，`package.json` 和 Docker 启动命令已统一到该入口。
-
-## 兼容策略
-
-根目录的 `services.ts`、`controllers.ts` 现在只保留 re-export，用于兼容旧测试和外部导入；新代码应从具体模块文件导入，不再向聚合文件添加业务实现。
+- 运行镜像必须安装 `git` 和 `ca-certificates`；Git 缺失时启动失败。
+- 每个服务实例只绑定一个仓库和绑定时的默认分支。
+- 不支持 Git LFS、子模块和符号链接文件。
+- 切换版本前停止旧服务并清空旧 `/var/lib/note-service`；GitHub 是唯一切换数据源。

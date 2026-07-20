@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { Check, Github, LoaderCircle, ShieldCheck } from 'lucide-react';
+import { Circle, CircleCheck, Github, LoaderCircle, ShieldCheck } from 'lucide-react';
 import { githubApi, type GitHubRepository, type SyncStatus } from '../../api';
-import { formatBytes, messageOf, phaseText } from '../../app/constants';
+import { messageOf, phaseText } from '../../app/constants';
 
 export function SetupScreen({ feedback, children, centered = false }: { feedback?: ReactNode; children: ReactNode; centered?: boolean }) {
   return <main className={centered ? 'setup-screen setup-screen-centered' : 'setup-screen'}>{feedback}{children}</main>;
@@ -78,63 +78,87 @@ export function ConnectGitHub({ error, onConnect }: { error: string | null; onCo
   </section>;
 }
 
-export function RepositoryPicker({ login, onSelect, compact = false }: { login: string | null; onSelect: (value: string) => Promise<void>; compact?: boolean }) {
+export function RepositoryPicker({ onSelect, compact = false }: { onSelect: (value: string) => Promise<void>; compact?: boolean }) {
   const [items, setItems] = useState<GitHubRepository[]>([]);
   const [value, setValue] = useState('');
-  const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     void githubApi.repositories().then(setItems).catch((reason) => setError(messageOf(reason))).finally(() => setLoading(false));
   }, []);
 
-  const visible = items.filter((item) => item.fullName.toLowerCase().includes(search.toLowerCase()));
-  const select = async (repository: string) => {
-    if (!repository.trim()) return;
+  const confirm = async () => {
+    if (!value) return;
+    setSubmitting(true);
     setError(null);
     try {
-      await onSelect(repository);
+      await onSelect(value);
     } catch (reason) {
       setError(messageOf(reason));
+    } finally {
+      setSubmitting(false);
     }
   };
 
   return <section className={compact ? 'repository-picker compact-picker' : 'setup-card repository-picker'}>
-    {!compact && <><span className="setup-icon"><ShieldCheck size={24} /></span><h1>选择笔记库</h1><p>已连接 <strong>{login}</strong>。只会下载仓库当前分支，不会克隆 Git 历史。</p></>}
-    <label>搜索可写仓库<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="owner/repository" /></label>
-    {loading ? <span className="inline-loading"><LoaderCircle className="spin" size={15} />读取仓库列表</span> : <div className="repository-list">
-      {visible.map((item) => <button type="button" key={item.fullName} className="repository-item" onClick={() => void select(item.fullName)}><span>{item.fullName}</span><small>{item.private ? '私有' : '公开'} · {item.branch}</small></button>)}
-      {!visible.length && <span className="empty-copy">没有匹配结果，可手动填写仓库名。</span>}
-    </div>}
-    <label className="manual-repository">手动填写仓库<input value={value} onChange={(event) => setValue(event.target.value)} placeholder="owner/repository" /></label>
-    <button type="button" className="quiet-action" disabled={!value.trim()} onClick={() => void select(value)}>使用此仓库</button>
+    {!compact && <h1>选择笔记库</h1>}
+    <select aria-label="选择笔记仓库" className="repository-select" value={value} disabled={loading || submitting} onChange={(event) => { setValue(event.target.value); setError(null); }}>
+      <option value="">{loading ? '正在读取仓库…' : '选择仓库'}</option>
+      {items.map((item) => <option value={item.fullName} key={item.fullName}>{item.fullName}</option>)}
+    </select>
+    <button type="button" className="accent-button repository-confirm" disabled={!value || loading || submitting} onClick={() => void confirm()}>
+      {submitting ? <LoaderCircle className="spin" size={16} /> : null}确认克隆并同步仓库
+    </button>
     {error && <span className="setup-error">{error}</span>}
   </section>;
 }
 
 export function InitializationProgress({ sync, onRetry }: { sync: SyncStatus; onRetry: () => Promise<void> }) {
+  const phaseOrder: SyncStatus['phase'][] = ['cloning', 'fetching', 'merging', 'committing', 'pushing', 'verifying'];
+  const currentStep = Math.max(0, phaseOrder.indexOf(sync.phase));
+  const phaseDetail: Record<SyncStatus['phase'], string> = {
+    idle: '正在准备同步',
+    cloning: '正在克隆仓库默认分支',
+    fetching: '正在读取 GitHub 最新版本',
+    merging: '正在合并本地与远端修改',
+    committing: '正在提交本地修改',
+    pushing: '正在推送提交到 GitHub',
+    verifying: '正在验证 GitHub ref',
+    completed: '仓库已完成同步',
+    failed: '同步未完成',
+  };
+  const steps = [
+    ['cloning', '克隆仓库'],
+    ['fetching', '读取远端版本'],
+    ['merging', '合并修改'],
+    ['pushing', '推送提交'],
+    ['verifying', '验证 GitHub ref'],
+  ] as const;
+
   return <section className="setup-card progress-card">
-    <span className="setup-icon"><LoaderCircle className="spin" size={25} /></span>
-    <h1>{phaseText[sync.phase]}</h1>
-    <p>{sync.currentPath ? `正在处理：${sync.currentPath}` : '正在准备本地笔记库。页面会持续更新进度。'}</p>
-    <Progress sync={sync} />
-    <div className="phase-list">{['校验授权', '读取文件树', '下载文件', '激活本地缓存'].map((item, index) => <span key={item} className={index <= phaseIndex(sync.phase) ? 'is-done' : ''}>{index <= phaseIndex(sync.phase) ? <Check size={14} /> : <i />}{item}</span>)}</div>
+    <h1>同步完整 Git 仓库</h1>
+    <div className="initial-sync-status" aria-live="polite">
+      <LoaderCircle className="spin" size={17} />
+      <div><strong>{phaseText[sync.phase]}</strong><span>{phaseDetail[sync.phase]}</span></div>
+    </div>
+    <ol className="initial-sync-steps">
+      {steps.map(([phase, label], index) => {
+        const isCurrent = phase === sync.phase;
+        const isDone = sync.phase === 'completed' || index < currentStep;
+        return <li className={isCurrent ? 'is-current' : isDone ? 'is-done' : ''} key={phase}>
+          {isDone ? <CircleCheck size={17} /> : isCurrent ? <LoaderCircle className="spin" size={17} /> : <Circle size={17} />}
+          {label}
+        </li>;
+      })}
+    </ol>
     {sync.lastError && <><span className="setup-error">{sync.lastError}</span><button type="button" className="quiet-action" onClick={() => void onRetry()}>重新尝试</button></>}
   </section>;
 }
 
 export function Progress({ sync }: { sync: SyncStatus }) {
-  const total = sync.totalBytes || sync.totalFiles;
-  const done = sync.totalBytes ? sync.processedBytes : sync.processedFiles;
-  const percent = total ? Math.min(100, Math.round(done / total * 100)) : 0;
   return <div className="progress-block">
-    <div><strong>{percent}%</strong><span>{sync.totalFiles ? `${sync.processedFiles} / ${sync.totalFiles} 个文件` : '正在准备文件列表'}</span></div>
-    <progress value={done} max={total || 1} />
-    {sync.totalBytes > 0 && <small>{formatBytes(sync.processedBytes)} / {formatBytes(sync.totalBytes)}</small>}
+    <div><LoaderCircle className="spin" size={16} /><span>{phaseText[sync.phase]}</span></div>
   </div>;
-}
-
-function phaseIndex(phase: SyncStatus['phase']) {
-  return ({ fetching: 0, merging: 1, committing: 2, verifying: 3, completed: 3 } as Partial<Record<SyncStatus['phase'], number>>)[phase] ?? -1;
 }

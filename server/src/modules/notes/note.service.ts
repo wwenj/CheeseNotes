@@ -1,19 +1,18 @@
-import { ConflictException, Injectable, NotFoundException, BadRequestException, Inject } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import MarkdownIt from 'markdown-it';
 import sanitizeHtml from 'sanitize-html';
+import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
-import { dirname, extname } from 'node:path';
+import { basename, dirname, extname } from 'node:path';
 import { hash } from '../../common/crypto.js';
 import { isText, mimeTypes } from '../../common/file-types.js';
 import { noteTitle } from '../../common/note-title.js';
 import { now } from '../../common/time.js';
 import { DatabaseService } from '../database/database.service.js';
-import { FileStoreService } from '../storage/file-store.service.js';
 import { PathPolicy } from '../storage/path-policy.service.js';
-import { SyncService } from '../sync/sync.service.js';
+import { RepositoryWorkspaceService } from '../storage/repository-workspace.service.js';
+import { SyncService, type TreeOperation } from '../sync/sync.service.js';
 
-type NoteRow = { id: string; path: string; revision: string; updated_at: string; title: string | null; content: string | null; remote_sha: string | null; dirty: number; deleted: number };
 type TreeEntry = { id: string; path: string; revision: string; assetVersion: string; updated_at: string; title: string };
 type NoteTree = { files: TreeEntry[]; folders: string[] };
 
@@ -23,6 +22,10 @@ function parentFolders(path: string, includePath = false) {
   return Array.from({ length: limit }, (_, index) => parts.slice(0, index + 1).join('/'));
 }
 
+function isWithin(path: string, folder: string) {
+  return path === folder || path.startsWith(`${folder}/`);
+}
+
 @Injectable()
 export class NoteService {
   private readonly md = new MarkdownIt({ html: false, linkify: true });
@@ -30,74 +33,155 @@ export class NoteService {
   constructor(
     @Inject(DatabaseService) private readonly database: DatabaseService,
     @Inject(PathPolicy) private readonly paths: PathPolicy,
-    @Inject(FileStoreService) private readonly files: FileStoreService,
+    @Inject(RepositoryWorkspaceService) private readonly workspace: RepositoryWorkspaceService,
     @Inject(SyncService) private readonly sync: SyncService,
   ) {}
 
   async content(path: string) {
     const safe = this.paths.safe(path);
     if (!isText(safe)) throw new BadRequestException('该文件不能作为文本笔记打开');
-    const row = this.database.db.prepare('SELECT id,path,content,revision FROM notes WHERE path=? AND deleted=0').get(safe) as { id: string; path: string; content: string | null; revision: string } | undefined;
+    const row = this.workspace.indexByPath(safe);
     if (!row) throw new NotFoundException('笔记不存在');
-    if (row.content === null) throw new BadRequestException('该文件不能作为文本笔记打开');
-    return { id: row.id, path: row.path, content: row.content, revision: row.revision };
+    return { id: row.id, path: row.path, content: await this.workspace.readText(safe), revision: row.revision };
   }
 
   async tree(): Promise<NoteTree> {
-    const rows = this.database.db.prepare('SELECT id,path,revision,updated_at,title,remote_sha FROM notes WHERE deleted=0 ORDER BY path').all() as Array<NoteRow & { remote_sha: string | null }>;
-    const files = rows.map((row) => ({ id: row.id, path: row.path, revision: row.revision, assetVersion: row.remote_sha ?? row.revision, updated_at: row.updated_at, title: row.title ?? noteTitle(row.path, row.content ?? '') }));
-    const localFolders = (this.database.db.prepare('SELECT path FROM local_folders').all() as Array<{ path: string }>).map((folder) => folder.path);
-    const visibleFolders = new Set([...files.flatMap((file) => parentFolders(file.path)), ...localFolders.flatMap((folder) => parentFolders(folder, true))]);
-    return { files, folders: [...visibleFolders].sort() };
+    return (await this.treeSnapshot()).tree;
+  }
+
+  async managementTree() {
+    const snapshot = await this.treeSnapshot();
+    return { ...snapshot.tree, treeVersion: snapshot.version };
+  }
+
+  async applyTreeChanges(baseTreeVersion: string, rawOperations: unknown[]) {
+    const current = await this.treeSnapshot();
+    if (baseTreeVersion !== current.version) throw new ConflictException({ code: 'TREE_VERSION_STALE', message: '文件结构已变化，请刷新后重新整理' });
+    const operations = rawOperations.map((operation) => this.parseTreeOperation(operation));
+    if (!operations.length) return { ...current.tree, treeVersion: current.version, sync: this.sync.status() };
+
+    const files = new Map(current.rows.map((row) => [row.id, { ...row }]));
+    let folders = new Set(current.tree.folders);
+    for (const operation of operations) {
+      if (operation.type === 'create-folder') {
+        const path = this.folderPath(operation.path);
+        const parent = parentFolders(path).at(-1) ?? '';
+        if (parent && !folders.has(parent)) throw new BadRequestException('目标父文件夹不存在');
+        if (folders.has(path) || [...files.values()].some((file) => file.path === path)) throw new ConflictException('目标位置已存在同名文件或目录');
+        folders.add(path);
+      }
+
+      if (operation.type === 'move-file') {
+        const file = files.get(operation.id);
+        if (!file || file.path !== this.paths.safe(operation.fromPath) || file.revision !== operation.revision) throw new ConflictException('文件已变化，请刷新后重试');
+        const destination = this.folderPath(operation.toFolder, true);
+        if (destination && !folders.has(destination)) throw new BadRequestException('目标文件夹不存在');
+        const path = this.paths.safe(destination ? `${destination}/${basename(file.path)}` : basename(file.path));
+        if (path !== file.path) {
+          if ([...files.values()].some((item) => item.id !== file.id && item.path === path) || folders.has(path)) throw new ConflictException('目标位置已有同名文件');
+          file.path = path;
+        }
+      }
+
+      if (operation.type === 'move-folder' || operation.type === 'rename-folder') {
+        const fromPath = this.folderPath(operation.fromPath);
+        const toPath = this.folderPath(operation.toPath);
+        if (!folders.has(fromPath)) throw new NotFoundException('文件夹不存在');
+        if (isWithin(toPath, fromPath)) throw new BadRequestException('不能将文件夹移入自身或其子文件夹');
+        const targetParent = parentFolders(toPath).at(-1) ?? '';
+        if (targetParent && !folders.has(targetParent)) throw new BadRequestException('目标父文件夹不存在');
+        if (folders.has(toPath) || [...files.values()].some((file) => file.path === toPath)) throw new ConflictException('目标位置已有同名文件或目录');
+        const movingFiles = [...files.values()].filter((file) => isWithin(file.path, fromPath));
+        const movingIds = new Set(movingFiles.map((file) => file.id));
+        const targets = movingFiles.map((file) => ({ file, path: `${toPath}${file.path.slice(fromPath.length)}` }));
+        for (const { path } of targets) {
+          if ([...files.values()].some((item) => !movingIds.has(item.id) && item.path === path)) throw new ConflictException('目标位置已有同名文件');
+        }
+        for (const { file, path } of targets) file.path = this.paths.safe(path);
+        folders = new Set([...folders].map((folder) => isWithin(folder, fromPath) ? `${toPath}${folder.slice(fromPath.length)}` : folder));
+      }
+
+      if (operation.type === 'delete-file') {
+        const file = files.get(operation.id);
+        if (!file || file.path !== this.paths.safe(operation.path) || file.revision !== operation.revision) throw new ConflictException('文件已变化，请刷新后重试');
+        files.delete(file.id);
+      }
+
+      if (operation.type === 'delete-folder') {
+        const path = this.folderPath(operation.path);
+        if (!folders.has(path)) throw new NotFoundException('文件夹不存在');
+        const affected = [...files.values()].filter((file) => isWithin(file.path, path));
+        if (affected.length && !operation.recursive) throw new ConflictException('文件夹非空，请确认递归删除');
+        for (const file of affected) files.delete(file.id);
+        folders = new Set([...folders].filter((folder) => !isWithin(folder, path)));
+      }
+    }
+
+    const idByPath = new Map([...files.values()].map((file) => [file.path, file.id]));
+    await this.sync.commitManagementTree({
+      operations,
+      idByPath,
+      baseGeneration: current.generation,
+      expectedFiles: current.rows.map(({ id, path, revision }) => ({ id, path, revision })),
+    });
+    const snapshot = await this.treeSnapshot();
+    return { ...snapshot.tree, treeVersion: snapshot.version, sync: this.sync.status() };
   }
 
   async createFolder(path: string) {
-    const folder = this.paths.safeFolder(path);
-    if (!await this.files.createFolder(folder)) throw new ConflictException('文件夹已存在');
-    this.database.db.prepare('INSERT OR IGNORE INTO local_folders(path,created_at) VALUES(?,?)').run(folder, now());
-    return { path: folder, sync: this.sync.status() };
+    return this.sync.write(async () => {
+      const folder = this.paths.safeFolder(path);
+      await this.workspace.createFolder(folder);
+      await this.sync.markDirty();
+      return { path: folder, sync: this.sync.status() };
+    });
   }
 
   async asset(path: string) {
     const safe = this.paths.safe(path);
-    const file = this.files.file(safe);
-    await fs.access(file).catch(() => this.sync.ensureAsset(safe));
+    const row = this.workspace.indexByPath(safe);
+    if (!row) throw new NotFoundException('文件不存在');
+    const file = this.workspace.file(safe);
     await fs.access(file).catch(() => { throw new NotFoundException('文件不存在'); });
-    const row = this.database.db.prepare('SELECT revision,remote_sha FROM notes WHERE path=? AND deleted=0').get(safe) as { revision?: string; remote_sha?: string | null } | undefined;
-    return { file, mime: mimeTypes[extname(safe).toLowerCase()] ?? 'application/octet-stream', version: row?.remote_sha ?? row?.revision ?? hash(safe) };
+    return { file, mime: mimeTypes[extname(safe).toLowerCase()] ?? 'application/octet-stream', version: row.revision };
   }
 
   async save(path: string, content: string, revision?: string, id?: string) {
-    const safe = this.paths.safe(path, true);
-    const current = (id
-      ? this.database.db.prepare('SELECT * FROM notes WHERE id=? AND deleted=0').get(id)
-      : this.database.db.prepare('SELECT * FROM notes WHERE path=? AND deleted=0').get(safe)) as (NoteRow & { remote_path: string | null; base_content: string | null }) | undefined;
-    if (current && revision && current.revision !== revision) throw new ConflictException({ message: '服务端笔记已变化', revision: current.revision });
-    if (!current && !revision && this.database.db.prepare('SELECT 1 FROM notes WHERE path=? AND deleted=0').get(safe)) throw new ConflictException('笔记已存在');
-    const target = this.titlePath(current?.path ?? safe, content);
-    const occupied = this.database.db.prepare('SELECT id FROM notes WHERE path=? AND deleted=0').get(target) as { id: string } | undefined;
-    if (occupied && occupied.id !== current?.id) throw new ConflictException('同名笔记已存在，请修改标题');
-    const result = { id: current?.id ?? randomUUID(), path: target, revision: hash(content) };
-    this.database.db.transaction(() => {
-      if (current) this.database.db.prepare('UPDATE notes SET path=?,content=?,revision=?,title=?,dirty=1,deleted=0,updated_at=? WHERE id=?').run(target, content, result.revision, noteTitle(target, content), now(), current.id);
-      else this.database.db.prepare('INSERT INTO notes(id,path,revision,updated_at,remote_sha,title,content,remote_path,base_content,dirty,deleted) VALUES(?,?,?,?,?,?,?,?,?,?,0)').run(result.id, target, result.revision, now(), null, noteTitle(target, content), content, null, null, 1);
-      this.database.db.prepare('UPDATE sync_workspace SET generation=generation+1,updated_at=? WHERE id=1').run(now());
-    })();
-    this.sync.schedule();
-    return { ...result, sync: this.sync.status() };
+    return this.sync.write(async () => {
+      const safe = this.paths.safe(path, true);
+      const current = id ? this.workspace.indexById(id) : this.workspace.indexByPath(safe);
+      if (current && revision && current.revision !== revision) throw new ConflictException({ message: '服务端笔记已变化', revision: current.revision });
+      if (!current && revision) throw new NotFoundException('笔记不存在');
+      const target = this.titlePath(current?.path ?? safe, content);
+      const occupied = this.workspace.indexByPath(target);
+      if (occupied && occupied.id !== current?.id) throw new ConflictException('同名笔记已存在，请修改标题');
+      if (target !== current?.path && await this.workspace.pathExists(target)) throw new ConflictException('目标位置已存在同名文件或目录');
+
+      const result = { id: current?.id ?? id ?? randomUUID(), path: target, revision: hash(content) };
+      if (current) {
+        await this.workspace.writeAtomic(current.path, content);
+        if (target !== current.path) await this.workspace.moveFile(current.path, target);
+      } else {
+        await this.workspace.writeAtomic(target, content);
+      }
+      const updatedAt = now();
+      this.database.db.prepare('INSERT OR REPLACE INTO file_index(id,path,revision,title,kind,updated_at) VALUES(?,?,?,?,?,?)').run(result.id, target, result.revision, noteTitle(target, content), 'markdown', updatedAt);
+      await this.sync.markDirty();
+      return { ...result, sync: this.sync.status() };
+    });
   }
 
   async remove(path: string, revision: string, id?: string) {
-    const safe = this.paths.safe(path, true);
-    const current = (id ? this.database.db.prepare('SELECT * FROM notes WHERE id=? AND deleted=0').get(id) : this.database.db.prepare('SELECT * FROM notes WHERE path=? AND deleted=0').get(safe)) as NoteRow | undefined;
-    if (!current) throw new NotFoundException('笔记不存在');
-    if (current.revision !== revision) throw new ConflictException('服务端笔记已变化');
-    this.database.db.transaction(() => {
-      this.database.db.prepare('UPDATE notes SET deleted=1,dirty=1,revision=?,updated_at=? WHERE id=?').run(hash(`deleted:${current.id}:${now()}`), now(), current.id);
-      this.database.db.prepare('UPDATE sync_workspace SET generation=generation+1,updated_at=? WHERE id=1').run(now());
-    })();
-    this.sync.schedule();
-    return { sync: this.sync.status() };
+    return this.sync.write(async () => {
+      const safe = this.paths.safe(path);
+      const current = id ? this.workspace.indexById(id) : this.workspace.indexByPath(safe);
+      if (!current) throw new NotFoundException('笔记不存在');
+      if (current.path !== safe || current.revision !== revision) throw new ConflictException('服务端笔记已变化');
+      await this.workspace.removeFile(current.path);
+      this.database.db.prepare('DELETE FROM file_index WHERE id=?').run(current.id);
+      await this.sync.markDirty();
+      return { sync: this.sync.status() };
+    });
   }
 
   async render(path: string) {
@@ -107,7 +191,38 @@ export class NoteService {
 
   search(q: string) {
     if (!q.trim()) return [];
-    return this.database.db.prepare('SELECT id,path,updated_at,title,revision,COALESCE(remote_sha,revision) assetVersion FROM notes WHERE deleted=0 AND (path LIKE ? OR title LIKE ?) LIMIT 50').all(`%${q}%`, `%${q}%`);
+    return this.database.db.prepare('SELECT id,path,updated_at,title,revision,revision assetVersion FROM file_index WHERE path LIKE ? OR title LIKE ? ORDER BY updated_at DESC LIMIT 50').all(`%${q}%`, `%${q}%`);
+  }
+
+  private async treeSnapshot() {
+    const rows = this.workspace.indexRows();
+    const files = rows.map((row) => ({ id: row.id, path: row.path, revision: row.revision, assetVersion: row.revision, updated_at: row.updated_at, title: row.title }));
+    const tree = { files, folders: await this.workspace.folders() };
+    const state = this.database.db.prepare('SELECT local_head,generation FROM repository_state WHERE id=1').get() as { local_head: string; generation: number };
+    const version = hash(JSON.stringify({ head: state.local_head, generation: state.generation, files: rows.map((row) => [row.id, row.path, row.revision]), folders: tree.folders }));
+    return { tree, version, rows, generation: state.generation };
+  }
+
+  private folderPath(value: string, allowRoot = false) {
+    if (typeof value !== 'string') throw new BadRequestException('非法文件夹路径');
+    const path = value.trim();
+    if (!path && allowRoot) return '';
+    return this.paths.safeFolder(path);
+  }
+
+  private parseTreeOperation(value: unknown): TreeOperation {
+    if (!value || typeof value !== 'object') throw new BadRequestException('非法文件树操作');
+    const operation = value as Record<string, unknown>;
+    const text = (key: string) => {
+      if (typeof operation[key] !== 'string') throw new BadRequestException('文件树操作参数不完整');
+      return operation[key] as string;
+    };
+    if (operation.type === 'create-folder') return { type: 'create-folder', path: text('path') };
+    if (operation.type === 'move-file') return { type: 'move-file', id: text('id'), fromPath: text('fromPath'), toFolder: text('toFolder'), revision: text('revision') };
+    if (operation.type === 'move-folder' || operation.type === 'rename-folder') return { type: operation.type, fromPath: text('fromPath'), toPath: text('toPath') };
+    if (operation.type === 'delete-file') return { type: 'delete-file', id: text('id'), path: text('path'), revision: text('revision') };
+    if (operation.type === 'delete-folder') return { type: 'delete-folder', path: text('path'), recursive: operation.recursive === true };
+    throw new BadRequestException('不支持的文件树操作');
   }
 
   private titlePath(path: string, content: string) {

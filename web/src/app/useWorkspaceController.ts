@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { githubApi, notesApi, settingsApi, syncApi, type GitHubConnection, type Note, type NoteSummary, type SyncStatus } from '../api';
+import { githubApi, notesApi, settingsApi, syncApi, type GitHubConnection, type Note, type NoteSummary, type SyncStatus, type TreeChangesResult, type TreeOperation } from '../api';
 import { ApiError, apiUrl } from '../api/http';
 import type { ArticleMode, ClientSettings, Draft } from './types';
 import { activeArticlePath, clampReaderFontSize, clientSettingsKey, forgetOpenedArticle, isSyncBusy, loadClientSettings, messageOf, newNotePath, recentArticlePaths, rememberOpenedArticle } from './constants';
@@ -17,7 +17,6 @@ type ClientWriteState = 'idle' | 'pending' | 'failed';
 
 const syncPollInterval = 500;
 const syncTimeout = 90_000;
-const autoSyncInterval = 15 * 60_000;
 const pause = (milliseconds: number) => new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
 
 export function useWorkspaceController(enabled = true) {
@@ -45,8 +44,6 @@ export function useWorkspaceController(enabled = true) {
   const loadSequence = useRef(0);
   const loadAbort = useRef<AbortController | null>(null);
   const autosaveRef = useRef<AutoSaveQueue | null>(null);
-  const autoSyncRepositoryRef = useRef<string | null>(null);
-  const runSyncRef = useRef<(options?: { automatic?: boolean }) => Promise<void>>(() => Promise.resolve());
 
   if (!autosaveRef.current) {
     autosaveRef.current = new AutoSaveQueue({
@@ -61,6 +58,7 @@ export function useWorkspaceController(enabled = true) {
             : await notesApi.create(nextDraft.path, nextDraft.content, nextDraft.id);
           return { kind: 'saved', revision: result.revision, path: result.path, id: result.id } as const;
         } catch (reason) {
+          if (reason instanceof ApiError && reason.status === 423) return { kind: 'busy' } as const;
           if (!(reason instanceof ApiError) || reason.status !== 409) throw reason;
           const current = await notesApi.content(nextDraft.path);
           return current.content === nextDraft.content
@@ -426,13 +424,13 @@ export function useWorkspaceController(enabled = true) {
     setSheetOpen(false);
   }, [autosave, draft]);
 
-  const runSync = useCallback(async (options: { automatic?: boolean } = {}) => {
+  const runSync = useCallback(async (options: { automatic?: boolean; skipDraft?: boolean } = {}) => {
     try {
       const current = selectedRef.current;
       const currentRepository = repositoryRef.current;
       const currentDraft = draft;
-      if (currentDraft && !currentRepository) throw new Error('未连接服务端，不能同步。');
-      if (currentDraft && currentRepository) {
+      if (!options.skipDraft && currentDraft && !currentRepository) throw new Error('未连接服务端，不能同步。');
+      if (!options.skipDraft && currentDraft && currentRepository) {
         if (!current) throw new Error('当前文档状态无效，不能同步。');
         const title = splitArticle(currentDraft.content, currentDraft.path).title.trim();
         if (!currentDraft.revision && (!title || title === '未命名')) throw new Error('当前草稿没有有效标题，不能同步。');
@@ -462,24 +460,81 @@ export function useWorkspaceController(enabled = true) {
     }
   }, [autosave, draft, reload]);
 
-  useEffect(() => {
-    runSyncRef.current = runSync;
-  }, [runSync]);
-
-  useEffect(() => {
-    if (!enabled || !auth?.connected || !repository) {
-      autoSyncRepositoryRef.current = null;
+  const reconcileTreeChanges = useCallback(async (result: TreeChangesResult) => {
+    setFiles(result.files);
+    setFolders(result.folders);
+    setSync(result.sync as SyncStatus);
+    await clearCachedAssets();
+    const current = selectedRef.current;
+    if (!current) return;
+    const next = result.files.find((file) => file.id === current.id || (!current.id && file.path === current.path));
+    const workspaceKey = repositoryRef.current ? workspaceKeyFor(repositoryRef.current) : null;
+    if (workspaceKey) {
+      await removeCachedDocument(workspaceKey, current.path);
+    }
+    if (!next) {
+      if (workspaceKey) autosave.stop(workspaceKey, current.path);
+      selectedRef.current = null;
+      setSelected(null);
+      setNote(null);
+      setDraft(null);
+      setArticleMode('read');
+      const repository = repositoryRef.current;
+      if (repository) {
+        forgetOpenedArticle(repository, current.path);
+        setRecentArticles((items) => items.filter((item) => item.id !== current.id && item.path !== current.path));
+      }
       return;
     }
-    if (loading) return;
-    const firstOpen = autoSyncRepositoryRef.current !== repository;
-    if (firstOpen) {
-      autoSyncRepositoryRef.current = repository;
-      void runSyncRef.current({ automatic: true });
+    selectedRef.current = next;
+    setSelected(next);
+    setNote((value) => value?.path === current.path ? { ...value, id: next.id, path: next.path, revision: next.revision ?? value.revision } : value);
+    setDraft((value) => value?.path === current.path ? { ...value, id: next.id, path: next.path, revision: next.revision ?? value.revision } : value);
+    reveal(next.path);
+    const repository = repositoryRef.current;
+    if (repository && isMarkdown(current.path)) {
+      forgetOpenedArticle(repository, current.path);
+      if (isMarkdown(next.path)) rememberOpenedArticle(repository, next.path);
+      setRecentArticles((items) => items.map((item) => item.id === next.id || item.path === current.path ? { ...item, ...next } : item));
     }
-    const timer = window.setInterval(() => void runSyncRef.current({ automatic: true }), autoSyncInterval);
-    return () => window.clearInterval(timer);
-  }, [auth?.connected, enabled, loading, repository]);
+  }, [autosave, reveal]);
+
+  const applyTreeChanges = useCallback(async (baseTreeVersion: string, operations: TreeOperation[]) => {
+    const result = await notesApi.applyTreeChanges(baseTreeVersion, operations);
+    await reconcileTreeChanges(result);
+    setSync(result.sync as SyncStatus);
+    return result;
+  }, [reconcileTreeChanges]);
+
+  const moveCurrentFile = useCallback(async (toFolder: string) => {
+    try {
+      if (!await flushCurrentDraft()) throw new Error('当前编辑内容保存失败，不能移动文件。');
+      const current = selectedRef.current;
+      if (!current?.id || !current.revision) return false;
+      const snapshot = await notesApi.managementTree();
+      await applyTreeChanges(snapshot.treeVersion, [{ type: 'move-file', id: current.id, fromPath: current.path, toFolder, revision: current.revision }]);
+      setNotice('文件已移动并同步。');
+      return true;
+    } catch (reason) {
+      setError(messageOf(reason));
+      return false;
+    }
+  }, [applyTreeChanges, flushCurrentDraft]);
+
+  const deleteCurrentFile = useCallback(async () => {
+    try {
+      if (!await flushCurrentDraft()) throw new Error('当前编辑内容保存失败，不能删除文件。');
+      const current = selectedRef.current;
+      if (!current?.id || !current.revision) return false;
+      const snapshot = await notesApi.managementTree();
+      await applyTreeChanges(snapshot.treeVersion, [{ type: 'delete-file', id: current.id, path: current.path, revision: current.revision }]);
+      setNotice('文件已删除并同步。');
+      return true;
+    } catch (reason) {
+      setError(messageOf(reason));
+      return false;
+    }
+  }, [applyTreeChanges, flushCurrentDraft]);
 
   const chooseRepository = useCallback(async (value: string) => {
     const previousRepository = repositoryRef.current;
@@ -500,7 +555,6 @@ export function useWorkspaceController(enabled = true) {
       setNote(null);
       setDraft(null);
       setClientWriteState('idle');
-      setNotice('仓库已选定，正在下载当前分支。');
     } catch (reason) {
       setError(messageOf(reason));
     }
@@ -530,38 +584,6 @@ export function useWorkspaceController(enabled = true) {
       setError(messageOf(reason));
     }
   }, [autosave, reload]);
-
-  const deleteCurrentArticle = useCallback(async () => {
-    if (!selected || !note || !window.confirm(`删除「${selected.path}」？`)) return;
-    try {
-      const workspaceKey = repositoryRef.current ? workspaceKeyFor(repositoryRef.current) : null;
-      if (workspaceKey) {
-        const saved = await autosave.flush(workspaceKey, selected.path);
-        if (!saved) return;
-        const revision = autosave.revision(workspaceKey, selected.path) ?? note.revision;
-        autosave.stop(workspaceKey, selected.path);
-        await notesApi.remove(selected.path, revision, selected.id);
-        await removeCachedDocument(workspaceKey, selected.path);
-      } else {
-        await notesApi.remove(selected.path, note.revision, selected.id);
-      }
-      setSheetOpen(false);
-      const currentRepository = repositoryRef.current;
-      if (currentRepository) {
-        forgetOpenedArticle(currentRepository, selected.path);
-        setRecentArticles((current) => current.filter((file) => file.path !== selected.path));
-      }
-      selectedRef.current = null;
-      setSelected(null);
-      setNote(null);
-      setDraft(null);
-      setArticleMode('read');
-      await reload(false);
-      setNotice('已从本机删除，正在同步。');
-    } catch (reason) {
-      setError(messageOf(reason));
-    }
-  }, [autosave, note, reload, selected]);
 
   const copyArticle = useCallback(async () => {
     const content = draft?.content ?? note?.content;
@@ -637,12 +659,14 @@ export function useWorkspaceController(enabled = true) {
     flushCurrentDraft,
     createNote,
     createFolder,
+    applyTreeChanges,
+    moveCurrentFile,
+    deleteCurrentFile,
     resetEditor,
     runSync,
     chooseRepository,
     disconnect,
     clearReadingCache,
-    deleteCurrentArticle,
     copyArticle,
     changeArticleMode,
     setReaderFontSize,

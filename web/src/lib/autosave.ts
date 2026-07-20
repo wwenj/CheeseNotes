@@ -9,6 +9,7 @@ export type AutoSaveDraft = {
 
 export type AutoSaveResult =
   | { kind: 'saved'; revision: string; path: string; id?: string }
+  | { kind: 'busy' }
   | { kind: 'blocked' };
 
 type AutoSaveQueueOptions = {
@@ -237,6 +238,10 @@ export class AutoSaveQueue {
     try {
       const result = await this.options.save(snapshot);
       if (task.retired) return true;
+      if (result.kind === 'busy') {
+        this.scheduleRetry(task);
+        return false;
+      }
       if (result.kind === 'blocked') {
         if (!task.blockedNotified) {
           task.blockedNotified = true;

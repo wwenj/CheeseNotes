@@ -32,8 +32,8 @@ export type ExplorerProps = {
 function Explorer({ files, folders, selectedPath, expanded, search, activeTool, sync, panel, onSearch, onToolChange, onToggle, onCollapseAll, onExpandAll, onRevealFolder, onSelect, onNewFile, onCreateFolder, onPanel, onSync }: ExplorerProps) {
   const [syncRequested, setSyncRequested] = useState(false);
   const syncing = syncRequested || isSyncBusy(sync);
-  const conflictBlocked = sync?.syncBlockedByConflicts || sync?.state === 'conflict';
-  const lastSyncAge = sync?.lastSuccessAt ? Date.now() - new Date(sync.lastSuccessAt).getTime() : 0;
+  const conflictBlocked = sync?.state === 'conflict';
+  const lastSyncAge = sync?.verifiedAt ? Date.now() - new Date(sync.verifiedAt).getTime() : 0;
   const syncTone = conflictBlocked ? 'is-conflict' : sync?.state === 'failed' ? 'is-failed' : syncing || sync?.state === 'verified' ? 'is-synced' : lastSyncAge > 24 * 60 * 60 * 1000 ? 'is-stale' : '';
   const treeFolderPaths = useMemo(() => folderPaths(files, folders), [files, folders]);
 
@@ -50,9 +50,9 @@ function Explorer({ files, folders, selectedPath, expanded, search, activeTool, 
   return <div className="explorer-panel">
     <header className="explorer-header">
       <div className="brand-lockup"><img className="brand-icon" src="/images/cheese-logo.png" alt="" /><strong>芝士</strong></div>
-      <button type="button" className={`sync-status ${syncTone}`} disabled={!conflictBlocked && (syncing || !sync?.manualSyncAvailable)} onClick={requestSync} aria-label={conflictBlocked ? `处理 ${sync?.conflictCount ?? 0} 个同步冲突` : `${stateText[sync?.state ?? 'unconfigured']}，${formatLastSync(sync?.lastSuccessAt ?? '')}`}>
+      <button type="button" className={`sync-status ${syncTone}`} disabled={!conflictBlocked && (syncing || !sync?.manualSyncAvailable)} onClick={requestSync} aria-label={conflictBlocked ? `处理 ${sync?.conflictCount ?? 0} 个同步冲突` : `${stateText[sync?.state ?? 'unconfigured']}，${formatLastSync(sync?.verifiedAt ?? '')}`}>
         <RefreshCw className={syncing ? 'spin' : ''} size={16} />
-        <span><b>{conflictBlocked ? `同步冲突` : stateText[sync?.state ?? 'unconfigured']}</b><small>{conflictBlocked ? '点击处理' : formatLastSync(sync?.lastSuccessAt ?? '')}</small></span>
+        <span><b>{conflictBlocked ? `同步冲突` : stateText[sync?.state ?? 'unconfigured']}</b><small>{conflictBlocked ? '点击处理' : formatLastSync(sync?.verifiedAt ?? '')}</small></span>
       </button>
     </header>
     <FileTree files={files} folders={folders} selectedPath={selectedPath} expanded={expanded} search={search} searchOpen={activeTool === 'search'} onToggle={onToggle} onSelect={onSelect} onRevealFolder={onRevealFolder} />

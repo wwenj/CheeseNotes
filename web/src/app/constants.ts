@@ -85,10 +85,12 @@ export const stateText: Record<SyncStatus['state'], string> = {
 
 export const phaseText: Record<SyncStatus['phase'], string> = {
   idle: '等待开始',
+  cloning: '克隆完整 Git 仓库',
   fetching: '读取 GitHub 版本',
   merging: '合并远端修改',
-  committing: '原子提交本地修改',
-  verifying: '验证 GitHub 内容',
+  committing: '提交本地修改',
+  pushing: '推送 GitHub',
+  verifying: '验证 GitHub ref',
   completed: '同步完成',
   failed: '同步失败',
 };

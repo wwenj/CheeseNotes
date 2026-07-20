@@ -130,4 +130,22 @@ describe('AutoSaveQueue', () => {
     expect(save).toHaveBeenCalledTimes(1);
     expect(blocked).toHaveBeenCalledTimes(1);
   });
+
+  it('同步锁返回 busy 时静默重试，不显示保存失败或 revision 冲突', async () => {
+    vi.useFakeTimers();
+    const retrying = vi.fn();
+    const blocked = vi.fn();
+    const save = vi.fn()
+      .mockResolvedValueOnce({ kind: 'busy' } as const)
+      .mockResolvedValueOnce({ kind: 'saved', revision: 'r1', path: '收件箱/草稿.md' } as const);
+    const queue = new AutoSaveQueue({ persist: vi.fn().mockResolvedValue(undefined), clear: vi.fn().mockResolvedValue(undefined), save, onSaved: vi.fn(), onRetrying: retrying, onBlocked: blocked });
+    queue.ensure(baseDraft());
+
+    queue.update({ ...baseDraft(), content: '同步期间继续编辑' });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(retrying).not.toHaveBeenCalled();
+    expect(blocked).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(save).toHaveBeenCalledTimes(2);
+  });
 });

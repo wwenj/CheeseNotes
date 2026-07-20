@@ -1,5 +1,5 @@
 import { useRef, useState, type TouchEvent } from 'react';
-import { ArrowLeft, ChevronRight, CircleHelp, Github, Info, ShieldCheck, SlidersHorizontal, Type, X } from 'lucide-react';
+import { ArrowLeft, ChevronRight, CircleHelp, FolderTree, Github, Info, ShieldCheck, SlidersHorizontal, Type, X } from 'lucide-react';
 import type { GitHubConnection } from '../../api';
 import { defaultClientSettings } from '../../app/constants';
 
@@ -13,6 +13,7 @@ type RepositorySettingsProps = {
   onClearReadingCache: () => Promise<void>;
   onClearAuthenticatorAccess: () => Promise<void>;
   onDisconnect: () => Promise<void>;
+  onOpenFileManagement?: () => void;
   onClose: () => void;
 };
 
@@ -38,7 +39,7 @@ function SettingsPageHeader({ title, onBack, onClose }: { title: string; onBack?
   </header>;
 }
 
-export default function RepositorySettings({ repository, auth, readerFontSize, onReaderFontSizeChange, onClearReadingCache, onClearAuthenticatorAccess, onDisconnect, onClose }: RepositorySettingsProps) {
+export default function RepositorySettings({ repository, auth, readerFontSize, onReaderFontSizeChange, onClearReadingCache, onClearAuthenticatorAccess, onDisconnect, onOpenFileManagement, onClose }: RepositorySettingsProps) {
   const [page, setPage] = useState<SettingsPage>('menu');
   const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
@@ -111,6 +112,7 @@ export default function RepositorySettings({ repository, auth, readerFontSize, o
       <nav className="settings-menu-list" aria-label="设置选项">
         <SettingsMenuItem icon={Type} title="阅读与编辑" onClick={() => setPage('reader')} />
         <SettingsMenuItem icon={Github} title="仓库与同步" onClick={() => setPage('repository')} />
+        <SettingsMenuItem icon={FolderTree} title="文件管理" onClick={() => onOpenFileManagement?.()} />
         <SettingsMenuItem icon={ShieldCheck} title="Authenticator 验证" onClick={() => setPage('authenticator')} />
         <SettingsMenuItem icon={Info} title="关于芝士" onClick={() => setPage('about')} />
       </nav>

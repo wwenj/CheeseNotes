@@ -8,7 +8,8 @@ import type { Panel } from './app/types';
 import Toast from './components/feedback/Toast';
 import WorkspaceShell from './components/layout/WorkspaceShell';
 import type { ExplorerTool } from './components/layout/ExplorerTools';
-import { ArticleActionSheet, ArticleToolbar, DocumentView } from './features/reader/ReaderViews';
+import { DocumentToolbar, FileActionSheet, DocumentView } from './features/reader/ReaderViews';
+import FileManagement from './features/manage/FileManagement';
 import RepositorySettings from './features/settings/RepositorySettings';
 import SyncPanel from './features/sync/SyncPanel';
 import { AuthenticatorGate, ConnectGitHub, InitializationProgress, RepositoryPicker, SetupScreen } from './features/setup/SetupScreens';
@@ -88,16 +89,39 @@ export default function App() {
 
   const navigateToPanel = useCallback((nextPanel: Panel) => {
     const nextPath = pathForPanel(nextPanel);
-    if (nextPanel !== 'vault') workspace.resetEditor();
-    setDrawerOpen(false);
-    navigate(nextPath);
-  }, [workspace.resetEditor]);
+    if (nextPanel === 'vault') {
+      setDrawerOpen(false);
+      navigate(nextPath);
+      return;
+    }
+    void workspace.flushCurrentDraft().then((saved) => {
+      if (!saved) {
+        workspace.setError('当前编辑内容保存失败，不能离开编辑页。');
+        return;
+      }
+      workspace.resetEditor();
+      setDrawerOpen(false);
+      navigate(nextPath);
+    });
+  }, [workspace.flushCurrentDraft, workspace.resetEditor, workspace.setError]);
 
   const closeSettingsToExplorer = useCallback(() => {
     workspace.resetEditor();
     setOpenExplorerOnReturn(true);
     navigate('/');
   }, [workspace.resetEditor]);
+
+  const openFileManagement = useCallback(() => {
+    void workspace.flushCurrentDraft().then((saved) => {
+      if (!saved) {
+        workspace.setError('当前编辑内容保存失败，不能进入文件管理。');
+        return;
+      }
+      workspace.resetEditor();
+      setDrawerOpen(false);
+      navigate('/manage');
+    });
+  }, [workspace.flushCurrentDraft, workspace.resetEditor, workspace.setError]);
 
   const openFile = useCallback((file: NoteSummary) => {
     setDrawerOpen(false);
@@ -214,8 +238,8 @@ export default function App() {
   if (accessState === 'required') return <SetupScreen centered><AuthenticatorGate error={accessError} onVerify={verifyAccess} /></SetupScreen>;
   if (workspace.loading && !workspace.auth) return <SetupScreen><LoaderCircle className="spin" size={21} />正在读取本地设置</SetupScreen>;
   if (!workspace.auth?.connected) return <SetupScreen feedback={feedback}><ConnectGitHub error={workspace.error} onConnect={startRepositoryConnection} /></SetupScreen>;
-  if (!workspace.repository) return <SetupScreen feedback={feedback}><RepositoryPicker login={workspace.auth.login} onSelect={workspace.chooseRepository} /></SetupScreen>;
-  if (workspace.sync?.state === 'checking' && workspace.sync && !workspace.files.length) return <SetupScreen feedback={feedback}><InitializationProgress sync={workspace.sync} onRetry={workspace.runSync} /></SetupScreen>;
+  if (!workspace.repository) return <SetupScreen feedback={feedback}><RepositoryPicker onSelect={workspace.chooseRepository} /></SetupScreen>;
+  if ((workspace.sync?.state === 'checking' || workspace.sync?.state === 'syncing') && workspace.sync && !workspace.files.length) return <SetupScreen feedback={feedback}><InitializationProgress sync={workspace.sync} onRetry={workspace.runSync} /></SetupScreen>;
 
   const explorer = {
     files: workspace.files,
@@ -250,7 +274,8 @@ export default function App() {
 
   const content = panel === 'vault' ? vaultContent
     : panel === 'sync' ? <SyncPanel sync={workspace.sync} onSync={workspace.runSync} onSyncStatus={workspace.setSync} onRefresh={() => void workspace.reload(false, { preserveCurrentDocument: true, forceTreeRefresh: true })} onError={workspace.setError} onClose={closeSettingsToExplorer} />
-      : <RepositorySettings repository={workspace.repository} auth={workspace.auth} readerFontSize={workspace.clientSettings.readerFontSize} onReaderFontSizeChange={workspace.setReaderFontSize} onClearReadingCache={workspace.clearReadingCache} onClearAuthenticatorAccess={clearAuthenticatorAccess} onDisconnect={workspace.disconnect} onClose={closeSettingsToExplorer} />;
+      : panel === 'manage' ? <FileManagement onApply={workspace.applyTreeChanges} onClose={() => navigate('/settings')} onNotice={workspace.setNotice} onError={workspace.setError} />
+        : <RepositorySettings repository={workspace.repository} auth={workspace.auth} readerFontSize={workspace.clientSettings.readerFontSize} onReaderFontSizeChange={workspace.setReaderFontSize} onClearReadingCache={workspace.clearReadingCache} onClearAuthenticatorAccess={clearAuthenticatorAccess} onDisconnect={workspace.disconnect} onOpenFileManagement={openFileManagement} onClose={closeSettingsToExplorer} />;
 
   return <WorkspaceShell
     explorer={explorer}
@@ -259,9 +284,9 @@ export default function App() {
     onDrawerClose={() => setDrawerOpen(false)}
     showMobileMenu={panel === 'vault'}
     feedback={feedback}
-    toolbar={panel === 'vault' && workspace.note && isMarkdown(workspace.selected?.path ?? '') ? <ArticleToolbar articleMode={workspace.articleMode} refreshState={workspace.documentRefresh} onToggle={() => void workspace.changeArticleMode(workspace.articleMode === 'read' ? 'write' : 'read')} onOpenMenu={() => workspace.setSheetOpen(true)} onRetry={workspace.retryDocumentUpdate} /> : null}
+    toolbar={panel === 'vault' && workspace.selected ? <DocumentToolbar isMarkdown={isMarkdown(workspace.selected.path)} articleMode={workspace.articleMode} refreshState={workspace.documentRefresh} onToggle={() => void workspace.changeArticleMode(workspace.articleMode === 'read' ? 'write' : 'read')} onOpenMenu={() => workspace.setSheetOpen(true)} onRetry={workspace.retryDocumentUpdate} /> : null}
   >
     {content}
-    {workspace.sheetOpen && workspace.note && <ArticleActionSheet mode={workspace.articleMode} onClose={() => workspace.setSheetOpen(false)} onModeChange={(mode) => void workspace.changeArticleMode(mode)} onCopy={() => void workspace.copyArticle()} onFavorite={() => { workspace.setSheetOpen(false); workspace.setNotice('收藏功能即将支持。'); }} onDelete={() => void workspace.deleteCurrentArticle()} />}
+    {workspace.sheetOpen && workspace.selected && <FileActionSheet file={workspace.selected} folders={workspace.folders} mode={workspace.articleMode} onClose={() => workspace.setSheetOpen(false)} onModeChange={(mode) => void workspace.changeArticleMode(mode)} onCopy={() => void workspace.copyArticle()} onFavorite={() => { workspace.setSheetOpen(false); workspace.setNotice('收藏功能即将支持。'); }} onMove={workspace.moveCurrentFile} onDelete={workspace.deleteCurrentFile} />}
   </WorkspaceShell>;
 }

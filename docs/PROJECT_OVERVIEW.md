@@ -4,7 +4,7 @@
 
 NoteAI 面向希望长期拥有、组织和使用自己笔记的人。它不是把 Markdown 上传到某个不可见的 SaaS 数据库，而是将笔记放入用户有写入权限的 GitHub 仓库；同时提供一套比直接编辑仓库文件更适合日常写作、阅读和移动使用的应用体验。
 
-产品由 Web 客户端、NestJS 服务端和 Capacitor iOS 壳组成。服务端持有一个 SQLite 工作副本，负责安全写入、GitHub 授权、远端增量同步与冲突处理；Web 和 iOS 都通过同一套 API 使用它。
+产品由 Web 客户端、NestJS 服务端和 Capacitor iOS 壳组成。服务端持有一个真实 Git working tree，负责安全写入、GitHub 授权、标准 Git 同步与冲突处理；SQLite 只保存索引和协调元数据。Web 和 iOS 都通过同一套 API 使用它。
 
 ## 1. 产品定位与核心原则
 
@@ -22,8 +22,8 @@ NoteAI 面向希望长期拥有、组织和使用自己笔记的人。它不是�
 
 1. **Markdown 优先**：可写入内容仅限 `.md`，标题、正文、内部链接和图片引用都保留在标准文件中。
 2. **GitHub 是可携带的远端副本**：用户可以直接用 GitHub、git 或其他 Markdown 工具访问仓库；NoteAI 不锁定数据格式。
-3. **服务端工作副本优先于浏览器直写**：每次编辑先进入 SQLite 的事务性本地状态，再由一个同步 Worker 串行推送，避免浏览器端承担 Git 并发和令牌安全问题。
-4. **同步状态必须可证明**：`verified` 的含义不是“请求已发出”，而是当前本地 generation 与远端 commit 都已被回读验证。
+3. **服务端 Git 工作副本优先于浏览器直写**：每次编辑先原子写入真实 working tree，再由同步协调器串行提交和推送，避免浏览器端承担 Git 并发和令牌安全问题。
+4. **同步状态必须可证明**：`verified` 的含义不是“请求已发出”，而是本地 HEAD、generation 和 GitHub 远端 ref 已验证一致。
 5. **阅读与写作是一件事的两个视图**：读模式服务于沉浸和跳转，写模式服务于自然编辑；两者使用同一 Markdown 内容，而非两套文档模型。
 6. **移动端按原生使用方式设计**：iOS 采用安全区域、抽屉手势、稳定的文本键盘和受保护的本地凭据存储。
 
@@ -39,11 +39,11 @@ NoteAI 面向希望长期拥有、组织和使用自己笔记的人。它不是�
 │ NoteAI Server                │
 │ NestJS + Fastify             │
 │                              │
-│ SQLite：笔记工作副本/状态     │
-│ Sync Worker：拉取、合并、提交 │
-│ File Store：媒体缓存          │
+│ Git working tree：全部文件    │
+│ SQLite：索引/任务/冲突元数据  │
+│ Sync：fetch/merge/push/verify │
 └──────────────┬───────────────┘
-               │ GitHub OAuth / Git Data API
+               │ GitHub OAuth / standard Git
 ┌──────────────▼───────────────┐
 │ 用户拥有写入权限的 GitHub 仓库 │
 │ 默认分支上的 Markdown 与资源   │
@@ -57,9 +57,9 @@ NoteAI 面向希望长期拥有、组织和使用自己笔记的人。它不是�
 | `web/` | React 19、TypeScript、Vite、CodeMirror 6 | 笔记工作台、阅读/写作、缓存、同步与冲突界面 |
 | `server/` | NestJS 11、Fastify、SQLite | 鉴权、笔记 API、GitHub OAuth、同步 Worker、静态资源托管 |
 | `ios-capacitor/` | Capacitor 8、iOS WebView | 复用 Web 应用，提供 iOS 安全存储与原生容器能力 |
-| GitHub | OAuth + Git Data API | 用户管理的远端笔记仓库与版本历史 |
+| GitHub | OAuth + Git Smart HTTP | 用户管理的远端笔记仓库与版本历史 |
 
-服务端是模块化单体：`auth`、`settings`、`notes`、`sync`、`github`、`storage` 和 `database` 有清晰边界，但部署时仍是一个进程、一套 API 与一个 SQLite 数据目录。这让个人笔记服务保持足够简单，也保留了同步流程所需的事务一致性。
+服务端是模块化单体：`auth`、`settings`、`notes`、`sync`、`github`、`storage` 和 `database` 有清晰边界，但部署时仍是一个进程、一套 API 与一个持久运行目录。这让个人笔记服务保持足够简单，也保留了仓库锁和恢复流程所需的一致性。
 
 ## 3. 用户旅程
 
@@ -68,17 +68,17 @@ NoteAI 面向希望长期拥有、组织和使用自己笔记的人。它不是�
 1. 用户打开客户端，先通过 Authenticator 的 6 位动态码验证设备。
 2. 通过 GitHub OAuth 授权，服务端获取仓库读写能力；客户端不接触 Client Secret 或 GitHub Access Token。
 3. 用户从有 `push` 权限的仓库中选择一个笔记库。
-4. 服务端读取该仓库当前默认分支的 tree，将支持的文件纳入本地工作副本。
+4. 服务端完整 clone 该仓库当前默认分支，将支持的文件纳入索引。
 5. 客户端加载文件树，用户可直接阅读、搜索和创建 Markdown 笔记。
 
 ### 3.2 日常编辑
 
-用户新建或修改文章后，客户端以静默自动保存方式把内容提交到服务端。服务端先在 SQLite 事务中写入内容、revision、标题、`dirty` 标记和 generation，再安排同步。用户切换文章、退出写作模式、主动同步或应用进入后台时，会先尝试 flush 当前编辑队列。
+用户新建或修改文章后，客户端以静默自动保存方式把内容提交到服务端。服务端用同目录临时文件和原子 rename 写入 working tree，更新 revision/index/generation，再安排同步。用户切换文章、退出写作模式、主动同步或应用进入后台时，会先尝试 flush 当前编辑队列。
 
 这里的“保存”和“同步”分为两个阶段：
 
-- **已保存到服务端**：内容已进入本机 SQLite，可继续在本设备读取和编辑；
-- **已验证同步**：远端默认分支已更新，服务端已重新读取并按字节哈希确认内容一致。
+- **已保存到服务端**：内容已进入本机 Git working tree，可继续读取和编辑；
+- **已验证同步**：远端默认分支已更新，并确认 GitHub ref 指向本次 candidate commit。
 
 ### 3.3 外部修改与冲突
 
@@ -112,7 +112,7 @@ NoteAI 面向希望长期拥有、组织和使用自己笔记的人。它不是�
 - 顶部控制区固定悬浮，正文排版保持克制，标题与正文之间只有浅分割线；
 - 最近访问文章会保存在客户端设置中，方便回到上次阅读位置。
 
-媒体文件并不被当成笔记正文写入。它们按支持的资源类型进入树，并在首次访问时由服务端从 GitHub 读取、缓存到本机文件存储；视频和音频接口支持 HTTP Range，适合流式加载与拖动播放。
+媒体文件并不被当成笔记正文写入。它们随完整 Git clone 直接存在 working tree，并由服务端流式读取；视频和音频接口支持 HTTP Range，适合流式加载与拖动播放。
 
 ### 4.3 写作体验：Markdown 源码与实时视觉反馈并存
 
@@ -162,7 +162,7 @@ iOS 不是另一套业务实现，而是通过 Capacitor 打包同一个 Web 应
 
 服务端路径策略拒绝绝对路径、`..`、隐藏目录和服务自身目录，并只允许受支持的文本/资源扩展名进入笔记库。写入接口仅允许 `.md`，这保证文章编辑不会意外改写任意二进制文件。
 
-文件树会同时展示远端已有文件以及本地新建的空文件夹。Git 本身不保存空目录，因此空文件夹仅是服务端本地组织信息；当其中创建文件后，文件会按正常同步路径进入 GitHub。
+文件树会同时展示远端已有文件以及新建空文件夹。空文件夹用隐藏 `.gitkeep` 表示并进入 Git 历史，文件树不会显示 `.gitkeep` 本身。
 
 ### 5.2 文件名与 revision
 
@@ -170,9 +170,9 @@ iOS 不是另一套业务实现，而是通过 Capacitor 打包同一个 Web 应
 
 1. 客户端写入时的乐观并发控制；
 2. 文档缓存与 ETag 校验；
-3. 服务端回读 GitHub 内容后的逐字节一致性验证。
+3. working tree 读取、HTTP ETag 和结构操作前的 revision 校验。
 
-删除不是立即从 SQLite 消失，而是先标记为 `deleted + dirty`，待远端删除提交与验证完成后才真正清理。
+删除直接发生在 working tree，并立即从可重建索引移除；同步失败时由 snapshot 恢复，历史恢复依赖 Git。
 
 ## 6. 权限与安全设计
 
@@ -192,23 +192,21 @@ iOS 不是另一套业务实现，而是通过 Capacitor 打包同一个 Web 应
 
 GitHub OAuth 的 Client ID、Client Secret、callback 和 homepage 配置只从 `server/config/github-oauth.local.json` 读取；Authenticator Secret 同样是服务端本地文件。这两个本地配置均被 Git 忽略，仓库只保留 example 文件。
 
-OAuth 成功得到的 GitHub Access Token 仅保存在服务端 SQLite settings 中，不会返回浏览器或 iOS 页面。断开 GitHub 时，服务端会清空 token、仓库设置、本地笔记工作副本、同步记录和媒体缓存；客户端也会删除相应的阅读缓存。
+OAuth 成功得到的 GitHub Access Token 仅保存在服务端 SQLite settings 中，不会返回浏览器或 iOS 页面。Git 子进程通过临时 `GIT_ASKPASS` 环境读取 token，remote URL、Git config、命令参数和日志都不包含 token。断开 GitHub 时，服务端会清空 token、仓库设置、working tree 和同步记录；客户端也会删除相应的阅读缓存。
 
 服务端默认将 `capacitor://localhost` 和配置的 Web origin 放入 CORS 白名单，并开放完整的读写预检方法。输入 DTO 使用 `transform + whitelist + forbidNonWhitelisted` 校验，路径再经过统一 `PathPolicy`，因此“通过 API 写出工作目录”的路径穿越并不在允许范围内。
 
 ## 7. 服务端与 GitHub 的双向同步
 
-### 7.1 为什么需要 SQLite 工作副本
+### 7.1 为什么使用真实 Git working tree
 
-GitHub 仓库是最终可见的远端，但编辑时直接调用 GitHub Contents API 会带来三个问题：难以在连续输入中正确合并、难以做多文件原子提交、失败时无法保留清晰的本地状态。NoteAI 因此使用 SQLite 保存工作副本：
+手工调用 GitHub Contents/Git Data API 等于重新实现一部分 Git：多文件事务、二进制 blob、rename、三方冲突、push 竞争、崩溃恢复都要自行拼装。NoteAI 直接使用系统 Git，让 `repository/` 成为唯一内容副本：
 
-- `notes`：当前内容、稳定 ID、路径、内容 hash/revision、远端 blob SHA、远端路径、上次共同基线、dirty/deleted 状态；
-- `sync_workspace`：本地 generation、已验证 generation、最后远端 head、已验证 head、状态、阶段、锁与重试时间；
-- `conflicts`：三方内容和用户决策；
-- `local_folders`：Git 无法表示的本地空目录；
-- 文件存储：仅缓存媒体资源和旧数据迁移来源，不承担文本笔记的同步真相。
-
-SQLite 以 WAL 模式运行。一次笔记保存会在同一事务内更新内容、revision、标题、dirty 状态并递增 generation，然后才调度同步 Worker；因此不会出现“内容已改但同步系统不知道”的中间状态。
+- `file_index`：稳定 ID、路径、字节 revision、标题、类型和时间，可随时从 working tree 重建；
+- `repository_state`：仓库、固定分支、local/remote HEAD、generation、锁和同步状态；
+- `sync_jobs`：base/snapshot/candidate commit 和任务阶段，用于崩溃恢复；
+- `conflicts`：三方 commit、三方临时文件和用户决策；
+- 文本和二进制内容只存在 working tree 和 Git 对象中，不进入 SQLite。
 
 ### 7.2 同步状态机
 
@@ -217,7 +215,7 @@ SQLite 以 WAL 模式运行。一次笔记保存会在同一事务内更新内�
 | `unconfigured` | 尚未选择仓库 |
 | `unauthorized` | 没有可用 GitHub Token |
 | `pending` | 本地存在 dirty 内容，等待或准备同步 |
-| `checking` | 正在读取远端默认分支、head 和 tree |
+| `checking` | 正在 clone 或 fetch 远端默认分支 |
 | `syncing` | 正在提交或验证本次变更 |
 | `conflict` | 检测到并发修改，需用户处理 |
 | `failed` | 本次同步失败，等待退避重试 |
@@ -227,40 +225,28 @@ SQLite 以 WAL 模式运行。一次笔记保存会在同一事务内更新内�
 
 ### 7.3 从 GitHub 拉到服务端
 
-同步 Worker 只读取所选仓库的当前默认分支，不 clone Git 历史。一次拉取流程如下：
-
-1. 校验 GitHub token 和仓库 `push` 权限，读取默认分支；
-2. 读取 branch head、commit tree 和支持路径的 blob 列表；
-3. 对每个远端文件，与 SQLite 中 `remote_sha`、`base_content` 和 `dirty` 状态比较；
-4. 本地未修改则直接以远端内容更新工作副本；远端新文件则插入本地；远端删除则删除本地未修改行；
-5. 如果本地也已修改且共同基线不同，创建 conflict，不覆盖任何一方。
-
-媒体不在首轮把所有二进制内容下载到本地。tree 中保留其元数据，用户打开资源时再按需从 GitHub 拉取并缓存。
+首次绑定执行完整 `--single-branch --no-tags` clone，不使用 shallow clone。后续同步执行 `git fetch origin`：working tree 干净时直接更新到远端 HEAD；存在本地 snapshot 时，以远端 HEAD 为基线 cherry-pick snapshot。远端默认分支发生变化时要求重新选择仓库，不静默换分支。
 
 ### 7.4 从服务端推到 GitHub
 
-本地 dirty 行会被 Worker 认领为本次提交的 claims。Worker 使用 GitHub Git Data API，而非逐文件提交：
-
-1. 为每个新增/更新文本创建 blob；删除操作创建 tree 删除项；路径变更会同时添加新路径、删除旧路径；
-2. 基于刚读取的远端 tree 创建新 tree；
-3. 创建一个包含全部 claims 的 commit；
-4. 用 `force: false` 更新默认分支 ref；
-5. 如果 ref 因并发 head 变化而返回 `422`，不强推，重新拉取并合并后再试；
-6. 提交成功后重新读取远端 snapshot，并逐篇下载文本，以 hash 与本地 revision 比较；
-7. 只有验证通过的行才清除 dirty，并把 `remote_sha`、`remote_path`、`base_content` 更新为确认后的值；全部干净后才写入 `verified`。
-
-这套“原子 commit + 回读验证”使得服务异常、网络波动或远端并发时，失败最多留下可恢复的 `pending/failed/conflict` 状态，不会把未证实的内容宣称为已同步。
+1. 校验 working tree，只允许支持文件和 `.gitkeep` 进入 stage；
+2. 将本地变化创建为 snapshot commit，并用内部 ref 保留恢复点；
+3. fetch 后远端若前进，则在远端 HEAD 上 cherry-pick snapshot；
+4. 发生冲突时使用 Git index stage 1/2/3，主路径采用远端，本地版本写为冲突副本；
+5. 使用普通 fast-forward `git push`，从不 force push；
+6. 用 `git ls-remote` 验证远端 ref 等于 candidate 后才进入 `verified`；
+7. push 竞争或验证失败时恢复同步前的未提交 working tree，进程重启则根据 `sync_jobs` 和 snapshot ref 继续确认或恢复。
 
 ### 7.5 冲突决策如何落地
 
-检测到冲突时，系统把本地版本复制为 `原文件名（冲突-设备标识-revision）.md`，并保留原文件的远端版本作为当前主路径。处理页可批量或逐条选择决策：
+检测到冲突时，系统把本地版本复制为 `原文件名（冲突-冲突标识）.md`，并保留原文件的远端版本作为当前主路径。处理页可批量或逐条选择决策：
 
 - **采用远端**：删除冲突副本；
 - **保留本地**：把冲突副本内容写回原路径，再删除副本；
 - **保留两个版本**：保留远端主文件与本地冲突副本；
 - **手动内容**：将用户提供的内容写回原路径。
 
-决策只先写入 SQLite，点击“处理冲突”后才统一应用并再次进入正常同步。界面使用乐观更新，避免逐条选择时闪烁；但最终结果仍以服务端同步状态为准。
+决策只先写入 SQLite 元数据，点击“处理冲突”后才写入 working tree 并再次进入正常同步。界面使用乐观更新，避免逐条选择时闪烁；但最终结果仍以服务端远端 ref 验证为准。
 
 ## 8. API 与模块边界
 
@@ -271,10 +257,10 @@ SQLite 以 WAL 模式运行。一次笔记保存会在同一事务内更新内�
 | 设备访问 | `GET /access/status`、`POST /access/verify` |
 | GitHub 授权 | `POST /auth/github/connect`、`GET /auth/github/callback`、`GET /auth/github/status`、`DELETE /auth/github` |
 | 仓库设置 | `GET/PUT /settings/repository`、`GET /github/repositories` |
-| 笔记 | `GET /tree`、`GET /notes/content`、`GET /notes/render`、`GET /files`、`GET /search`、`POST/PUT/DELETE /notes`、`POST /folders` |
+| 笔记 | `GET /tree`、`GET /tree/management`、`POST /tree/changes`、内容/资源/搜索接口、`POST/PUT/DELETE /notes`、`POST /folders` |
 | 同步 | `GET /sync/status`、`POST /sync`、冲突列表/详情/决策/应用接口 |
 
-服务端依赖关系保持单向：Notes 写入 SQLite 后只调用 Sync 的调度能力；Sync 直接读取 `notes.dirty/deleted`，并依赖 Settings、GitHub、Storage 与 Database；Sync 不反向依赖 NoteService。这样同步是否成功不会被 HTTP Controller 或文件缓存实现影响。
+服务端依赖关系保持单向：Notes 写入 `RepositoryWorkspaceService` 后只调用 Sync 的调度能力；Sync 依赖 GitProcess、Workspace、Settings、GitHub metadata 和 Database，但不反向依赖 NoteService。
 
 ## 9. 部署与开发
 
@@ -324,8 +310,9 @@ Capacitor 打包的是独立的 `www/` 产物。线上服务需允许 `capacitor
 当前实现有意保持以下边界：
 
 - 以个人单服务、单工作副本为目标，不是多人实时协同编辑器；
-- 同步基于仓库当前默认分支，不 clone 或展示完整 Git 历史；
-- 空文件夹只在本地保留，符合 Git 的数据模型；
+- 同步完整 clone 绑定时的默认分支，但产品界面不展示完整 Git 历史；
+- 空文件夹通过隐藏 `.gitkeep` 进入 Git 历史；
+- 不支持 Git LFS、子模块和符号链接文件；
 - 写作仅开放 Markdown，媒体以读取和预览为主；
 - 收藏入口已预留在文章操作中，但功能尚未实现；
 - iOS 壳复用 Web，不额外维护一套原生笔记业务逻辑。
@@ -348,4 +335,3 @@ Capacitor 打包的是独立的 `www/` 产物。线上服务需允许 `capacitor
 | GitHub API 封装 | `server/src/modules/github/github.service.ts` |
 | 设备与 OAuth 授权 | `server/src/modules/auth/` |
 | 数据库 schema | `server/src/modules/database/database.service.ts` |
-

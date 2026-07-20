@@ -15,22 +15,12 @@ const verified = {
   state: 'verified' as const,
   phase: 'completed' as const,
   dirtyCount: 0,
-  pendingCount: 0,
   conflictCount: 0,
-  currentPath: '',
-  processedFiles: 0,
-  totalFiles: 0,
-  processedBytes: 0,
-  totalBytes: 0,
-  resolutionDraftCount: 0,
-  syncBlockedByConflicts: false,
-  lastSuccessAt: '',
-  lastError: '',
-  lastRemoteHead: 'head',
-  verifiedRemoteHead: 'head',
-  localGeneration: 1,
+  generation: 1,
   verifiedGeneration: 1,
-  nextRetryAt: '',
+  remoteHead: 'head',
+  verifiedAt: '',
+  lastError: '',
   manualSyncAvailable: true,
 };
 
@@ -69,24 +59,22 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('workspace automatic sync', () => {
-  it('首屏同步一次，之后每 15 分钟同步，不在页面重新可见时同步', async () => {
+describe('workspace sync trigger', () => {
+  it('首屏、定时器和页面重新可见都不会自动触发同步', async () => {
     renderHook(() => useWorkspaceController());
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
-    expect(api.syncRun).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(15 * 60_000);
+      await vi.advanceTimersByTimeAsync(30 * 60_000);
     });
-    expect(api.syncRun).toHaveBeenCalledTimes(2);
 
     await act(async () => {
       document.dispatchEvent(new Event('visibilitychange'));
       await vi.advanceTimersByTimeAsync(0);
     });
-    expect(api.syncRun).toHaveBeenCalledTimes(2);
+    expect(api.syncRun).not.toHaveBeenCalled();
   });
 });

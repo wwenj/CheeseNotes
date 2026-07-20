@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import type { Panel } from './types';
 
-export type AppPath = '/' | '/sync' | '/settings';
+export type AppPath = '/' | '/sync' | '/settings' | '/manage';
 export type AppRoute = { pathname: AppPath };
 
 const listeners = new Set<() => void>();
@@ -20,7 +20,7 @@ function subscribe(listener: () => void) {
 }
 
 export function routeForPath(pathname: string): AppPath {
-  if (pathname === '/sync' || pathname === '/settings') return pathname;
+  if (pathname === '/sync' || pathname === '/settings' || pathname === '/manage') return pathname;
   return '/';
 }
 
@@ -42,11 +42,13 @@ export function navigate(pathname: AppPath) {
 export function panelForRoute(pathname: AppPath): Panel {
   if (pathname === '/sync') return 'sync';
   if (pathname === '/settings') return 'settings';
+  if (pathname === '/manage') return 'manage';
   return 'vault';
 }
 
 export function pathForPanel(panel: Panel): AppPath {
   if (panel === 'sync') return '/sync';
   if (panel === 'settings') return '/settings';
+  if (panel === 'manage') return '/manage';
   return '/';
 }

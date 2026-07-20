@@ -1,453 +1,831 @@
-import { BadRequestException, Inject, Injectable, OnModuleInit, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, HttpException, Inject, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { dirname, extname, join } from 'node:path';
-import { hash } from '../../common/crypto.js';
+import { existsSync, promises as fs, statSync } from 'node:fs';
+import { basename, dirname, extname, join } from 'node:path';
 import { isText } from '../../common/file-types.js';
-import { noteTitle } from '../../common/note-title.js';
 import { now } from '../../common/time.js';
 import { DatabaseService } from '../database/database.service.js';
 import { GitHubService } from '../github/github.service.js';
-import type { TreeEntry } from '../github/contracts/github.types.js';
 import { RepositoryService } from '../settings/repository.service.js';
-import { FileStoreService } from '../storage/file-store.service.js';
+import { GitProcessService } from '../storage/git-process.service.js';
 import { PathPolicy } from '../storage/path-policy.service.js';
+import { FileIndexRow, RepositoryWorkspaceService } from '../storage/repository-workspace.service.js';
 import type { ConflictAction, SaveConflictDecisionDto } from './contracts/sync.dto.js';
-import type { NoteRow, SyncPhase, SyncState, WorkspaceRow } from './contracts/sync.types.js';
+import type { RepositoryStateRow, SyncState, SyncStatus } from './contracts/sync.types.js';
 
-type RemoteSnapshot = { head: string; treeSha: string; entries: Map<string, TreeEntry> };
-type Claim = Pick<NoteRow, 'id' | 'path' | 'remote_path' | 'content' | 'revision' | 'deleted'>;
-const retryDelays = [5_000, 15_000, 30_000, 60_000, 300_000];
+export type TreeOperation =
+  | { type: 'create-folder'; path: string }
+  | { type: 'move-file'; id: string; fromPath: string; toFolder: string; revision: string }
+  | { type: 'move-folder' | 'rename-folder'; fromPath: string; toPath: string }
+  | { type: 'delete-file'; id: string; path: string; revision: string }
+  | { type: 'delete-folder'; path: string; recursive?: boolean };
+
+export type ManagementCommit = {
+  operations: TreeOperation[];
+  idByPath: Map<string, string>;
+  baseGeneration: number;
+  expectedFiles: Array<Pick<FileIndexRow, 'id' | 'path' | 'revision'>>;
+};
+
+type JobType = 'sync' | 'management';
 const quietSyncDelay = 10 * 60_000;
+const cloneTimeout = 30 * 60_000;
 
 @Injectable()
 export class SyncService implements OnModuleInit {
-  private active: Promise<void> | null = null;
-  private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  private active: Promise<unknown> | null = null;
+  private writes = 0;
   private quietTimer: ReturnType<typeof setTimeout> | null = null;
-  private forceRequested = false;
-  private deferredRequested = false;
-  private activeForced = false;
 
   constructor(
     @Inject(DatabaseService) private readonly database: DatabaseService,
     @Inject(PathPolicy) private readonly paths: PathPolicy,
     @Inject(RepositoryService) private readonly repository: RepositoryService,
     @Inject(GitHubService) private readonly github: GitHubService,
-    @Inject(FileStoreService) files?: FileStoreService,
-  ) { this.files = files ?? new FileStoreService(paths); }
+    @Inject(GitProcessService) private readonly git: GitProcessService,
+    @Inject(RepositoryWorkspaceService) private readonly workspace: RepositoryWorkspaceService,
+  ) {}
 
-  private readonly files: FileStoreService;
-
-  onModuleInit() {
-    void this.bootstrap();
+  async onModuleInit() {
+    await this.bootstrap();
   }
 
-  status() {
-    const workspace = this.workspace();
-    const dirtyCount = this.countDirty();
+  status(): SyncStatus {
+    const row = this.state();
     const conflictCount = this.countConflicts();
-    const state = this.derivedState(workspace, dirtyCount, conflictCount);
+    let state = row.state;
+    if (!row.repository) state = 'unconfigured';
+    else if (!this.github.hasToken()) state = 'unauthorized';
+    else if (conflictCount && !this.active && row.state !== 'checking' && row.state !== 'syncing') state = 'conflict';
     return {
       state,
-      phase: workspace.phase,
-      dirtyCount,
-      pendingCount: dirtyCount,
+      phase: row.phase,
+      dirtyCount: row.dirty_count,
       conflictCount,
-      currentPath: '', processedFiles: 0, totalFiles: 0, processedBytes: 0, totalBytes: 0,
-      resolutionDraftCount: this.countDecisions(), syncBlockedByConflicts: false,
-      lastSuccessAt: workspace.verified_at, lastError: workspace.last_error,
-      lastRemoteHead: workspace.last_remote_head, verifiedRemoteHead: workspace.verified_remote_head,
-      localGeneration: workspace.generation, verifiedGeneration: workspace.verified_generation,
-      nextRetryAt: workspace.next_retry_at,
-      manualSyncAvailable: !this.active && Boolean(this.repository.get()) && this.github.hasToken(),
+      generation: row.generation,
+      verifiedGeneration: row.verified_generation,
+      remoteHead: row.remote_head,
+      verifiedAt: row.verified_at,
+      lastError: row.last_error,
+      manualSyncAvailable: !this.active && this.writes === 0 && Boolean(row.repository) && this.github.hasToken() && !conflictCount,
     };
   }
 
+  assertWritable() {
+    if (this.active || this.writes > 0 || this.state().lock_token) {
+      throw new HttpException({ code: 'SYNC_BUSY', message: '同步正在更新 Git 工作区，请稍后重试' }, 423);
+    }
+    if (!this.workspace.exists()) throw new ConflictException({ code: 'WORKSPACE_NOT_READY', message: 'Git 工作区尚未初始化' });
+  }
+
+  async write<T>(work: () => Promise<T>) {
+    this.assertWritable();
+    this.writes += 1;
+    try {
+      return await work();
+    } finally {
+      this.writes -= 1;
+    }
+  }
+
+  async markDirty() {
+    const status = await this.git.run(['status', '--porcelain=v1', '-z', '--untracked-files=all'], { cwd: this.workspace.root });
+    const dirtyCount = this.workspace.parseStatus(status).length;
+    this.database.db.prepare("UPDATE repository_state SET generation=generation+1,dirty_count=?,state='pending',phase='idle',last_error='',updated_at=? WHERE id=1").run(dirtyCount, now());
+    this.schedule();
+  }
+
   schedule() {
-    this.setWorkspace({ state: 'pending', phase: 'idle', last_error: '', next_retry_at: '' });
-    if (this.activeForced || this.forceRequested) {
-      this.forceRequested = true;
-      return;
-    }
-    this.scheduleQuietSync();
+    if (this.quietTimer) clearTimeout(this.quietTimer);
+    this.quietTimer = setTimeout(() => {
+      this.quietTimer = null;
+      this.triggerSync();
+    }, quietSyncDelay);
   }
 
-  // 兼容旧调用方；写入已由 NoteService 的 SQLite 事务完成。
-  record() { this.schedule(); }
-
-  triggerInitialize() { return this.triggerSync(); }
-  reset() { return this.triggerSync(); }
-
-  triggerSync() {
-    this.forceRequested = true;
-    this.clearQuietTimer();
-    this.clearRetryTimer();
-    return this.startSync();
-  }
-
-  private startSync() {
-    if (!this.repository.get()) {
-      this.setWorkspace({ state: 'unconfigured', phase: 'idle' });
-      return this.status();
-    }
-    if (!this.github.hasToken()) {
-      this.setWorkspace({ state: 'unauthorized', phase: 'idle' });
-      return this.status();
-    }
-    if (this.active) return this.status();
-    const forced = this.forceRequested;
-    this.forceRequested = false;
-    this.deferredRequested = false;
-    if (forced) this.clearQuietTimer();
-    this.activeForced = forced;
-    this.active = this.run(forced).finally(() => {
-      this.active = null;
-      this.activeForced = false;
-      if (this.forceRequested || this.deferredRequested) void this.startSync();
-    });
+  async reset() {
+    if (this.writes > 0) throw new HttpException({ code: 'SYNC_BUSY', message: '文件正在保存，请稍后重试' }, 423);
+    this.git.cancelActive();
+    const active = this.active;
+    if (active) await active.catch(() => undefined);
+    await this.discardIncompleteRepository();
     return this.status();
   }
 
+  triggerSync() {
+    if (!this.repository.get()) {
+      this.setState({ state: 'unconfigured', phase: 'idle' });
+      return this.status();
+    }
+    if (!this.github.hasToken()) {
+      this.setState({ state: 'unauthorized', phase: 'idle' });
+      return this.status();
+    }
+    if (!this.workspace.exists() || !this.repository.branch()) {
+      void this.discardIncompleteRepository().catch(() => undefined);
+      return this.status();
+    }
+    if (this.countConflicts()) {
+      this.setState({ state: 'conflict', phase: 'idle' });
+      return this.status();
+    }
+    if (this.writes > 0) {
+      throw new HttpException({ code: 'SYNC_BUSY', message: '文件正在保存，请稍后重试同步' }, 423);
+    }
+    if (this.active) return this.status();
+    if (this.quietTimer) clearTimeout(this.quietTimer);
+    this.quietTimer = null;
+    const needsInitialization = !this.workspace.exists() || !this.repository.branch();
+    this.setState({ state: 'checking', phase: needsInitialization ? 'cloning' : 'fetching', last_error: '' });
+    void this.exclusive(() => this.runSync()).catch(() => undefined);
+    return this.status();
+  }
+
+  async selectRepository(value: string) {
+    if (this.active || this.writes > 0) throw new HttpException({ code: 'SYNC_BUSY', message: '同步正在进行，请稍后重试' }, 423);
+    const current = this.state();
+    const normalized = value.trim().replace(/\/$/, '').replace(/\.git$/, '').replace(/^(?:git@github\.com:|https:\/\/github\.com\/)/, '');
+    const workingChanges = current.repository && current.repository !== normalized && this.workspace.exists()
+      ? this.workspace.parseStatus(await this.git.run(['status', '--porcelain=v1', '-z', '--untracked-files=all'], { cwd: this.workspace.root })).length
+      : 0;
+    if (current.repository && current.repository !== normalized && (current.dirty_count > 0 || workingChanges > 0 || this.countConflicts() > 0)) {
+      throw new ConflictException({ code: 'LOCAL_CHANGES', message: '当前仓库存在未同步修改或未处理冲突，不能切换仓库' });
+    }
+    const repository = this.repository.set(value);
+    this.setState({ state: 'checking', phase: 'cloning', last_error: '' });
+    void this.exclusive(() => this.initialize()).catch(() => undefined);
+    return { repository, sync: this.status() };
+  }
+
   async clearWorkspace() {
-    this.clearQuietTimer();
-    this.clearRetryTimer();
-    this.forceRequested = false;
-    this.deferredRequested = false;
-    this.activeForced = false;
-    await this.active;
-    await this.files.clear();
+    if (this.quietTimer) clearTimeout(this.quietTimer);
+    this.quietTimer = null;
+    if (this.writes > 0) throw new HttpException({ code: 'SYNC_BUSY', message: '文件正在保存，请稍后重试' }, 423);
+    if (this.active) await this.active;
+    await this.workspace.clear();
+    await fs.rm(join(this.workspace.jobsRoot, 'conflicts'), { recursive: true, force: true });
     this.database.db.transaction(() => {
-      this.database.db.prepare('DELETE FROM notes').run();
-      this.database.db.prepare('DELETE FROM pending').run();
       this.database.db.prepare('DELETE FROM conflicts').run();
-      this.database.db.prepare('DELETE FROM local_folders').run();
-      this.database.db.prepare("UPDATE sync_workspace SET generation=0,verified_generation=-1,last_remote_head='',verified_remote_head='',verified_at='',state='unconfigured',phase='idle',last_error='',next_retry_at='',lock_token='',lock_until='',updated_at='' WHERE id=1").run();
+      this.database.db.prepare('DELETE FROM sync_jobs').run();
     })();
+  }
+
+  async commitManagementTree(change: ManagementCommit) {
+    if (this.active) throw new HttpException({ code: 'SYNC_BUSY', message: '同步正在进行，请稍后重试' }, 423);
+    return this.exclusive(() => this.runManagement(change));
   }
 
   conflicts({ cursor, limit, query, review }: { cursor?: string; limit?: string; query?: string; review?: string }) {
     const offset = Math.max(0, Number.parseInt(cursor ?? '0', 10) || 0);
     const pageSize = Math.min(50, Math.max(1, Number.parseInt(limit ?? '50', 10) || 50));
     const where = [query?.trim() ? 'path LIKE ?' : '', review === 'decided' ? 'resolution_action IS NOT NULL' : '', review === 'undecided' ? 'resolution_action IS NULL' : ''].filter(Boolean);
-    const values: Array<string | number> = query?.trim() ? [`%${query.trim()}%`] : [];
+    const values: string[] = query?.trim() ? [`%${query.trim()}%`] : [];
     const filter = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const total = (this.database.db.prepare(`SELECT count(*) count FROM conflicts ${filter}`).get(...values) as { count: number }).count;
-    const items = this.database.db.prepare(`SELECT id,path,remote_commit,created_at,COALESCE(operation,'update') operation,resolution_action,resolution_copy_path,length(COALESCE(local_content,'')) local_bytes,length(COALESCE(remote_content,'')) remote_bytes FROM conflicts ${filter} ORDER BY created_at,id LIMIT ? OFFSET ?`).all(...values, pageSize, offset);
+    const rows = this.database.db.prepare(`SELECT id,path,remote_commit,created_at,operation,resolution_action,copy_path,kind FROM conflicts ${filter} ORDER BY created_at,id LIMIT ? OFFSET ?`).all(...values, pageSize, offset) as Array<Record<string, string | null>>;
+    const items = rows.map((row) => ({
+      ...row,
+      resolution_copy_path: row.copy_path,
+      local_bytes: this.artifactSize(row.id as string, 'local'),
+      remote_bytes: this.artifactSize(row.id as string, 'remote'),
+    }));
     return { items, nextCursor: offset + items.length < total ? String(offset + items.length) : null, total, resolutionDraftCount: this.countDecisions() };
   }
 
-  conflictDetail(id: string): any {
-    const row = this.database.db.prepare('SELECT * FROM conflicts WHERE id=?').get(id) as Record<string, unknown> | undefined;
-    return row ? { ...row, operation: row.operation ?? 'update' } : null;
+  async conflictDetail(id: string) {
+    const row = this.database.db.prepare('SELECT * FROM conflicts WHERE id=?').get(id) as Record<string, string | null> | undefined;
+    if (!row) return null;
+    const text = row.kind === 'markdown' || row.kind === 'text';
+    return {
+      ...row,
+      resolution_copy_path: row.copy_path,
+      base_content: text ? await this.readArtifact(row.base_file) : null,
+      local_content: text ? await this.readArtifact(row.local_file) : null,
+      remote_content: text ? await this.readArtifact(row.remote_file) : null,
+      local_bytes: this.artifactSize(id, 'local'),
+      remote_bytes: this.artifactSize(id, 'remote'),
+    };
   }
 
-  saveConflictDecision(id: string, dto: SaveConflictDecisionDto) {
-    if (dto.clear) this.database.db.prepare('UPDATE conflicts SET resolution_action=NULL,resolution_content=NULL WHERE id=?').run(id);
+  async saveConflictDecision(id: string, dto: SaveConflictDecisionDto) {
+    if (!this.database.db.prepare('SELECT 1 FROM conflicts WHERE id=?').get(id)) throw new NotFoundException('冲突不存在');
+    if (dto.clear) this.database.db.prepare('UPDATE conflicts SET resolution_action=NULL,resolution_content=NULL,resolution_updated_at=NULL WHERE id=?').run(id);
     else if (dto.action) this.database.db.prepare('UPDATE conflicts SET resolution_action=?,resolution_content=?,resolution_updated_at=? WHERE id=?').run(dto.action, dto.action === 'manual' ? dto.content ?? '' : null, now(), id);
     else throw new BadRequestException('请选择冲突处理方式');
-    return { ok: true, conflict: this.conflictDetail(id), sync: this.status() };
+    return { ok: true, conflict: await this.conflictDetail(id), sync: this.status() };
   }
 
   saveAllConflictDecisions(dto: SaveConflictDecisionDto) {
-    if (dto.clear) this.database.db.prepare('UPDATE conflicts SET resolution_action=NULL,resolution_content=NULL').run();
+    if (dto.clear) this.database.db.prepare('UPDATE conflicts SET resolution_action=NULL,resolution_content=NULL,resolution_updated_at=NULL').run();
     else if (dto.action && dto.action !== 'manual') this.database.db.prepare('UPDATE conflicts SET resolution_action=?,resolution_content=NULL,resolution_updated_at=?').run(dto.action, now());
     else throw new BadRequestException('请选择自动处理方式');
     return { ok: true, sync: this.status() };
   }
 
-  applyConflictDecisions() {
+  async applyConflictDecisions() {
+    if (this.active) throw new HttpException({ code: 'SYNC_BUSY', message: '同步正在进行，请稍后重试' }, 423);
     const rows = this.database.db.prepare('SELECT * FROM conflicts WHERE resolution_action IS NOT NULL').all() as Array<Record<string, string | null>>;
-    for (const row of rows) this.applyDecision(row);
-    this.schedule();
+    if (!rows.length) return this.status();
+    this.assertWritable();
+    await this.exclusive(async () => {
+      for (const row of rows) await this.applyDecision(row);
+      this.database.db.prepare(`DELETE FROM conflicts WHERE id IN (${rows.map(() => '?').join(',')})`).run(...rows.map((row) => row.id));
+      await Promise.all(rows.map((row) => fs.rm(join(this.workspace.jobsRoot, 'conflicts', row.id ?? ''), { recursive: true, force: true })));
+      await this.markDirty();
+    });
+    this.triggerSync();
     return this.status();
   }
 
-  async ensureAsset(path: string) {
-    const safe = this.paths.safe(path);
-    if (this.files.exists(safe)) return;
-    const fullName = this.repository.get();
-    if (!fullName || !this.github.hasToken()) throw new UnauthorizedException('请先连接 GitHub');
-    const branch = this.repository.branch() || (await this.github.repository(fullName)).default_branch;
-    const data = await this.github.raw(fullName, safe, branch);
-    await this.files.write(safe, data);
-  }
-
   private async bootstrap() {
-    await this.migrateLegacyRows();
-    const row = this.workspace();
-    if (row.state === 'syncing') this.setWorkspace({ state: this.countDirty() ? 'pending' : 'checking', phase: 'idle', lock_token: '', lock_until: '' });
-    this.triggerSync();
+    await this.workspace.prepareRoots();
+    this.database.db.prepare("UPDATE repository_state SET lock_token='',updated_at=? WHERE id=1").run(now());
+    await this.recoverJobs();
+    if (this.repository.get() && (!this.workspace.exists() || !this.repository.branch())) await this.discardIncompleteRepository();
   }
 
-  private async migrateLegacyRows() {
-    const rows = this.database.db.prepare('SELECT * FROM notes WHERE id IS NULL OR content IS NULL OR remote_path IS NULL').all() as NoteRow[];
-    for (const row of rows) {
-      const content = row.content ?? (isText(row.path) ? await this.files.readText(row.path).catch(() => null) : null);
-      this.database.db.prepare('UPDATE notes SET id=COALESCE(id,?),content=COALESCE(content,?),revision=CASE WHEN content IS NULL AND ? IS NOT NULL THEN ? ELSE revision END,remote_path=COALESCE(remote_path,path),base_content=COALESCE(base_content,?),title=COALESCE(title,?),dirty=COALESCE(dirty,0),deleted=COALESCE(deleted,0) WHERE path=?').run(randomUUID(), content, content, content === null ? null : hash(content), content, noteTitle(row.path, content ?? ''), row.path);
-    }
-    const pending = this.database.db.prepare('SELECT path,op,base_content,local_content FROM pending').all() as Array<{ path: string; op: string; base_content: string | null; local_content: string | null }>;
-    const mark = this.database.db.transaction(() => {
-      for (const item of pending) {
-        const existing = this.database.db.prepare('SELECT id FROM notes WHERE path=?').get(item.path) as { id?: string } | undefined;
-        if (existing) this.database.db.prepare('UPDATE notes SET content=COALESCE(?,content),base_content=COALESCE(?,base_content),revision=?,dirty=1,deleted=? WHERE path=?').run(item.local_content, item.base_content, hash(item.local_content ?? ''), item.op === 'delete' ? 1 : 0, item.path);
-        else this.database.db.prepare('INSERT INTO notes(path,revision,updated_at,remote_sha,title,id,content,remote_path,base_content,dirty,deleted) VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(item.path, hash(item.local_content ?? ''), now(), null, noteTitle(item.path, item.local_content ?? ''), randomUUID(), item.local_content, null, item.base_content, 1, item.op === 'delete' ? 1 : 0);
-      }
-      if (pending.length) {
-        this.database.db.prepare('DELETE FROM pending').run();
-        this.bumpGeneration();
-      }
-      const invalid = (this.database.db.prepare('SELECT count(*) count FROM notes WHERE id IS NULL OR remote_path IS NULL').get() as { count: number }).count;
-      if (invalid) throw new Error('旧笔记迁移校验失败：存在缺少稳定标识或远端路径的记录');
-      this.database.db.prepare('INSERT OR REPLACE INTO schema_migrations(version,applied_at) VALUES(2,?)').run(now());
-    });
-    mark();
-  }
-
-  private async run(forced: boolean) {
+  private async exclusive<T>(work: () => Promise<T>): Promise<T> {
+    if (this.active || this.writes > 0) throw new HttpException({ code: 'SYNC_BUSY', message: '同步正在进行，请稍后重试' }, 423);
     const token = randomUUID();
-    if (!this.acquireLock(token)) {
-      if (forced) this.forceRequested = true;
-      this.requestRetry(500);
+    const claimed = this.database.db.prepare("UPDATE repository_state SET lock_token=?,updated_at=? WHERE id=1 AND lock_token='' ").run(token, now());
+    if (!claimed.changes) throw new HttpException({ code: 'SYNC_BUSY', message: '同步正在进行，请稍后重试' }, 423);
+    const promise = work();
+    this.active = promise;
+    try {
+      return await promise;
+    } finally {
+      this.database.db.prepare('UPDATE repository_state SET lock_token=?,updated_at=? WHERE id=1 AND lock_token=?').run('', now(), token);
+      this.active = null;
+    }
+  }
+
+  private async initialize() {
+    const fullName = this.repository.get();
+    if (!fullName) return;
+    const token = this.github.accessToken();
+    try {
+      this.setState({ state: 'checking', phase: 'cloning', last_error: '' });
+      const meta = await this.github.repository(fullName);
+      const storedBranch = this.repository.branch();
+      if (storedBranch && storedBranch !== meta.default_branch) {
+        throw new ConflictException({ code: 'DEFAULT_BRANCH_CHANGED', message: 'GitHub 默认分支已变化，请断开后重新选择仓库' });
+      }
+      const branch = storedBranch || meta.default_branch || 'main';
+      const cloneUrl = this.github.cloneUrl(fullName);
+      const remoteHead = await this.lsRemoteUrl(cloneUrl, branch, token);
+      await this.workspace.clear();
+      if (remoteHead) {
+        await this.git.run(['clone', '--single-branch', '--no-tags', '--branch', branch, '--', cloneUrl, this.workspace.root], { cwd: this.workspace.jobsRoot, token, timeout: cloneTimeout });
+      } else {
+        await fs.mkdir(this.workspace.root, { recursive: true });
+        await this.git.run(['init', `--initial-branch=${branch}`], { cwd: this.workspace.root });
+        await this.git.run(['remote', 'add', 'origin', cloneUrl], { cwd: this.workspace.root });
+      }
+      await this.configureIdentity();
+      await this.assertRepositorySafety();
+      await this.workspace.rebuildIndex();
+      const head = await this.head();
+      this.repository.bind(fullName, branch, head || remoteHead);
+    } catch (reason) {
+      await this.discardIncompleteRepository();
+      throw reason;
+    }
+  }
+
+  private async runSync(retry = 0): Promise<void> {
+    if (!this.workspace.exists() || !this.repository.branch()) {
+      await this.discardIncompleteRepository();
       return;
     }
+    const jobId = this.createJob('sync', []);
+    const state = this.state();
+    let base = '';
+    let snapshot = '';
     try {
-      const { fullName, branch } = await this.remote();
-      this.setWorkspace({ state: 'checking', phase: 'fetching', last_error: '', next_retry_at: '' });
-      let remote = await this.snapshot(fullName, branch);
-      await this.reconcileRemote(fullName, remote);
-      const claims = this.claims();
-      if (claims.length) {
-        this.setWorkspace({ state: 'syncing', phase: 'committing' });
-        const committed = await this.commitClaims(fullName, branch, remote, claims);
-        if (!committed) {
-          this.setWorkspace({ state: 'pending', phase: 'idle' });
-          this.requestRetry(0);
-          return;
-        }
-        remote = await this.snapshot(fullName, branch);
-        this.setWorkspace({ state: 'syncing', phase: 'verifying', last_remote_head: remote.head });
-        await this.verifyAndAcknowledge(fullName, remote, claims);
-        await this.reconcileRemote(fullName, remote);
+      await this.assertRepositorySafety();
+      base = await this.head();
+      const status = await this.git.run(['status', '--porcelain=v1', '-z', '--untracked-files=all'], { cwd: this.workspace.root });
+      const observedChanges = this.workspace.parseStatus(status);
+      if (observedChanges.length && state.dirty_count === 0) {
+        this.database.db.prepare('UPDATE repository_state SET generation=generation+1,dirty_count=?,updated_at=? WHERE id=1').run(observedChanges.length, now());
       }
-      this.finish(remote.head, forced);
-    } catch (error) {
-      this.fail(error);
-    } finally {
-      this.releaseLock(token);
-    }
-  }
-
-  private async remote() {
-    await this.github.user();
-    const fullName = this.repository.get();
-    const meta = await this.github.repository(fullName);
-    this.repository.setBranch(meta.default_branch);
-    return { fullName, branch: meta.default_branch };
-  }
-
-  private async snapshot(fullName: string, branch: string): Promise<RemoteSnapshot> {
-    const head = await this.github.head(fullName, branch);
-    const commit = await this.github.commit(fullName, head);
-    const entries = (await this.github.tree(fullName, head)).filter((entry) => entry.type === 'blob' && this.paths.allowed(entry.path));
-    this.setWorkspace({ last_remote_head: head });
-    return { head, treeSha: commit.tree.sha, entries: new Map(entries.map((entry) => [entry.path, entry])) };
-  }
-
-  private async reconcileRemote(fullName: string, remote: RemoteSnapshot) {
-    this.setWorkspace({ phase: 'merging' });
-    const local = this.database.db.prepare('SELECT * FROM notes').all() as NoteRow[];
-    const byRemote = new Map(local.filter((note) => note.remote_path).map((note) => [note.remote_path!, note]));
-    const localCreates = new Map(local.filter((note) => note.dirty && !note.deleted && !note.remote_path).map((note) => [note.path, note]));
-    for (const [path, entry] of remote.entries) {
-      const note = byRemote.get(path);
-      if (!note) {
-        const localCreate = localCreates.get(path);
-        if (localCreate) {
-          const content = isText(path) ? (await this.github.raw(fullName, path, remote.head)).toString('utf8') : null;
-          this.makeConflict(localCreate, content, entry.sha, remote.head);
-          continue;
-        }
-        const content = isText(path) ? (await this.github.raw(fullName, path, remote.head)).toString('utf8') : null;
-        this.database.db.prepare('INSERT OR IGNORE INTO notes(path,revision,updated_at,remote_sha,title,id,content,remote_path,base_content,dirty,deleted) VALUES(?,?,?,?,?,?,?,?,?,?,0)').run(path, hash(content ?? path), now(), entry.sha, noteTitle(path, content ?? ''), randomUUID(), content, path, content, 0);
-        continue;
-      }
-      if ((note.remote_sha === entry.sha && note.content !== null) || !isText(path)) continue;
-      const content = (await this.github.raw(fullName, path, remote.head)).toString('utf8');
-      if (note.dirty && note.base_content !== content) this.makeConflict(note, content, entry.sha, remote.head);
-      else this.database.db.prepare('UPDATE notes SET path=?,content=?,revision=?,remote_sha=?,remote_path=?,base_content=?,title=?,dirty=0,deleted=0,updated_at=? WHERE id=?').run(path, content, hash(content), entry.sha, path, content, noteTitle(path, content), now(), note.id);
-    }
-    for (const note of local) {
-      if (!note.remote_path || remote.entries.has(note.remote_path)) continue;
-      if (note.dirty) this.makeConflict(note, null, '', remote.head);
-      else this.database.db.prepare('DELETE FROM notes WHERE id=?').run(note.id);
-    }
-  }
-
-  private makeConflict(note: NoteRow, remoteContent: string | null, remoteSha: string, remoteHead: string) {
-    const copyPath = this.conflictPath(note.path, this.workspace().device_id, note.revision);
-    const remotePath = note.remote_path ?? note.path;
-    const operation = note.remote_path ? 'update' : 'create';
-    const transaction = this.database.db.transaction(() => {
-      this.database.db.prepare('INSERT OR IGNORE INTO conflicts(id,path,base_content,local_content,remote_content,remote_commit,created_at,operation,resolution_copy_path) VALUES(?,?,?,?,?,?,?,?,?)').run(randomUUID(), note.path, note.base_content, note.content, remoteContent, remoteHead, now(), operation, copyPath);
-      if (remoteContent === null) this.database.db.prepare('UPDATE notes SET deleted=1,dirty=0,updated_at=? WHERE id=?').run(now(), note.id);
-      else this.database.db.prepare('UPDATE notes SET path=?,content=?,revision=?,remote_path=?,base_content=?,remote_sha=?,dirty=0,deleted=0,title=?,updated_at=? WHERE id=?').run(remotePath, remoteContent, hash(remoteContent), remotePath, remoteContent, remoteSha, noteTitle(remotePath, remoteContent), now(), note.id);
-      this.database.db.prepare('INSERT OR IGNORE INTO notes(path,revision,updated_at,remote_sha,title,id,content,remote_path,base_content,dirty,deleted) VALUES(?,?,?,?,?,?,?,?,?,?,0)').run(copyPath, note.revision, now(), null, noteTitle(copyPath, note.content ?? ''), randomUUID(), note.content, null, null, 1);
-      this.bumpGeneration();
-    });
-    transaction();
-  }
-
-  private async commitClaims(fullName: string, branch: string, remote: RemoteSnapshot, claims: Claim[]) {
-    const operations: Array<{ path: string; sha: string | null }> = [];
-    for (const claim of claims) {
-      if (claim.deleted) {
-        if (claim.remote_path && remote.entries.has(claim.remote_path)) operations.push({ path: claim.remote_path, sha: null });
-        continue;
-      }
-      const blob = await this.github.createBlob(fullName, claim.content ?? '');
-      operations.push({ path: claim.path, sha: blob });
-      if (claim.remote_path && claim.remote_path !== claim.path && remote.entries.has(claim.remote_path)) operations.push({ path: claim.remote_path, sha: null });
-    }
-    if (!operations.length) return true;
-    const tree = await this.github.createTree(fullName, remote.treeSha, operations);
-    const commit = await this.github.createCommit(fullName, `noteai: sync ${claims.length} note${claims.length > 1 ? 's' : ''}`, tree, remote.head);
-    return this.github.updateRef(fullName, branch, commit);
-  }
-
-  private async verifyAndAcknowledge(fullName: string, remote: RemoteSnapshot, claims: Claim[]) {
-    const verified = new Map<string, { sha: string; content: string }>();
-    for (const claim of claims) {
-      const entry = remote.entries.get(claim.path);
-      if (claim.deleted) {
-        if (claim.remote_path && remote.entries.has(claim.remote_path)) continue;
-        verified.set(claim.id, { sha: '', content: '' });
-      } else if (entry) {
-        const remoteContent = (await this.github.raw(fullName, claim.path, remote.head)).toString('utf8');
-        if (hash(remoteContent) === claim.revision) verified.set(claim.id, { sha: entry.sha, content: remoteContent });
-      }
-    }
-    const acknowledge = this.database.db.transaction(() => {
-      for (const claim of claims) {
-        if (!verified.has(claim.id)) continue;
-        if (claim.deleted) this.database.db.prepare('DELETE FROM notes WHERE id=? AND revision=? AND dirty=1 AND deleted=1').run(claim.id, claim.revision);
-        else {
-          const acknowledged = verified.get(claim.id)!;
-          const clean = this.database.db.prepare('UPDATE notes SET dirty=0,remote_path=path,remote_sha=?,base_content=content,updated_at=? WHERE id=? AND revision=? AND dirty=1 AND deleted=0').run(acknowledged.sha, now(), claim.id, claim.revision);
-          if (!clean.changes) this.database.db.prepare('UPDATE notes SET remote_path=?,remote_sha=?,base_content=?,updated_at=? WHERE id=? AND revision<>? AND dirty=1 AND deleted=0').run(claim.path, acknowledged.sha, acknowledged.content, now(), claim.id, claim.revision);
+      const changes = await this.workspace.assertSupportedWorkingChanges(status);
+      const stagePaths = [...new Set(changes.flatMap((entry) => entry.paths))];
+      await this.assertSafeStagePaths(stagePaths);
+      if (stagePaths.length) {
+        this.setState({ state: 'syncing', phase: 'committing', last_error: '' });
+        await this.git.run(['add', '--all', '--', ...stagePaths], { cwd: this.workspace.root });
+        if (await this.hasStagedChanges()) {
+          await this.commit('noteai: sync local changes');
+          snapshot = await this.head();
+          await this.keepJobRef(jobId, snapshot);
+          this.updateJob(jobId, { snapshot_commit: snapshot, phase: 'snapshot' });
         }
       }
-    });
-    acknowledge();
-  }
 
-  private finish(head: string, forced: boolean) {
-    const dirty = this.countDirty();
-    const conflicts = this.countConflicts();
-    const workspace = this.workspace();
-    if (conflicts) this.setWorkspace({ state: 'conflict', phase: 'completed', last_remote_head: head });
-    else if (dirty) {
-      this.setWorkspace({ state: 'pending', phase: 'idle', last_remote_head: head });
-      if (forced) this.forceRequested = true;
-      else this.ensureQuietSync();
+      this.setState({ state: 'checking', phase: 'fetching' });
+      const remoteHead = await this.fetchRemote();
+      let candidate = snapshot || base;
+      const remoteAdvanced = Boolean(remoteHead && remoteHead !== base);
+      if (!snapshot && remoteAdvanced) {
+        await this.git.run(['reset', '--hard', remoteHead], { cwd: this.workspace.root });
+        candidate = remoteHead;
+      } else if (snapshot && remoteAdvanced) {
+        this.setState({ state: 'syncing', phase: 'merging' });
+        await this.git.run(['reset', '--hard', remoteHead], { cwd: this.workspace.root });
+        candidate = await this.cherryPickWithConflicts(snapshot, base, remoteHead, jobId);
+      }
+
+      if (candidate && candidate !== remoteHead) {
+        this.updateJob(jobId, { candidate_commit: candidate, phase: 'pushing' });
+        this.setState({ state: 'syncing', phase: 'pushing' });
+        await this.pushAndVerify(candidate, remoteHead);
+      } else {
+        await this.verifyRemote(candidate);
+      }
+
+      const verifiedHead = candidate || remoteHead;
+      await this.finishVerified(verifiedHead, remoteAdvanced);
+      this.completeJob(jobId);
+    } catch (reason) {
+      if (snapshot) await this.restoreDirty(base, snapshot).catch(() => undefined);
+      await this.discardJobConflicts(jobId);
+      this.failJob(jobId, reason);
+      if (retry < 1 && this.errorCode(reason) === 'PUSH_RACE') {
+        return this.runSync(retry + 1);
+      }
+      this.fail(reason);
+      throw reason;
     }
-    else this.setWorkspace({ state: 'verified', phase: 'completed', last_remote_head: head, verified_remote_head: head, verified_generation: workspace.generation, verified_at: now(), last_error: '', next_retry_at: '' });
   }
 
-  private fail(error: unknown) {
-    const attempts = (this.database.db.prepare("SELECT count(*) count FROM sync_runs WHERE state='failed'").get() as { count: number }).count;
-    const delay = retryDelays[Math.min(attempts, retryDelays.length - 1)];
-    const next = new Date(Date.now() + delay).toISOString();
-    const message = error instanceof Error ? error.message : '同步失败';
-    this.setWorkspace({ state: this.countConflicts() ? 'conflict' : 'failed', phase: 'failed', last_error: message, next_retry_at: next });
-    this.database.db.prepare('INSERT INTO sync_runs(state,error,created_at) VALUES(?,?,?)').run('failed', message, now());
-    this.requestRetry(delay);
+  private async runManagement(change: ManagementCommit) {
+    const jobId = this.createJob('management', change.operations);
+    const beforeState = this.state();
+    let base = '';
+    let snapshot = '';
+    let mutated = false;
+    let reconciledRemote = false;
+    try {
+      const actualFiles = this.workspace.indexRows().map(({ id, path, revision }) => ({ id, path, revision }));
+      if (beforeState.generation !== change.baseGeneration || JSON.stringify(actualFiles) !== JSON.stringify(change.expectedFiles)) {
+        throw new ConflictException({ code: 'TREE_VERSION_STALE', message: '文件结构已变化，请刷新后重新整理' });
+      }
+      await this.assertRepositorySafety();
+      base = await this.head();
+      if (base !== beforeState.local_head) throw new ConflictException({ code: 'LOCAL_HEAD_CHANGED', message: '本地 Git 基线已变化，请刷新后重试' });
+      this.setState({ state: 'checking', phase: 'fetching', last_error: '' });
+      const remoteHead = await this.fetchRemote();
+      if (remoteHead !== beforeState.remote_head) {
+        await this.runSync();
+        reconciledRemote = true;
+        throw new ConflictException({ code: 'REMOTE_CHANGED', message: 'GitHub 文件结构已变化，请刷新后重新操作' });
+      }
+
+      const status = await this.git.run(['status', '--porcelain=v1', '-z', '--untracked-files=all'], { cwd: this.workspace.root });
+      const existingChanges = await this.workspace.assertSupportedWorkingChanges(status);
+      const existingPaths = [...new Set(existingChanges.flatMap((entry) => entry.paths))];
+      await this.assertSafeStagePaths(existingPaths);
+      if (existingPaths.length) {
+        await this.git.run(['add', '--all', '--', ...existingPaths], { cwd: this.workspace.root });
+        if (await this.hasStagedChanges()) {
+          await this.commit('noteai: management snapshot');
+          snapshot = await this.head();
+          await this.keepJobRef(jobId, snapshot);
+          this.updateJob(jobId, { snapshot_commit: snapshot, phase: 'snapshot' });
+        }
+      }
+      if (!snapshot) {
+        snapshot = base;
+        if (snapshot) {
+          await this.keepJobRef(jobId, snapshot);
+          this.updateJob(jobId, { snapshot_commit: snapshot, phase: 'snapshot' });
+        }
+      }
+
+      this.setState({ state: 'syncing', phase: 'committing' });
+      mutated = change.operations.length > 0;
+      for (const operation of change.operations) await this.applyTreeOperation(operation);
+      const finalStatus = await this.git.run(['status', '--porcelain=v1', '-z', '--untracked-files=all'], { cwd: this.workspace.root });
+      const finalChanges = await this.workspace.assertSupportedWorkingChanges(finalStatus);
+      const finalPaths = [...new Set(finalChanges.flatMap((entry) => entry.paths))];
+      await this.assertSafeStagePaths(finalPaths);
+      if (finalPaths.length) await this.git.run(['add', '--all', '--', ...finalPaths], { cwd: this.workspace.root });
+
+      let candidate = base;
+      if (base) {
+        await this.git.run(['reset', '--soft', base], { cwd: this.workspace.root });
+        if (await this.hasStagedChanges()) {
+          await this.commit(`noteai: organize ${change.operations.length} item${change.operations.length === 1 ? '' : 's'}`);
+          candidate = await this.head();
+        }
+      } else if (snapshot) {
+        if (await this.hasStagedChanges()) await this.git.run(['commit', '--amend', '--no-edit'], { cwd: this.workspace.root });
+        candidate = await this.head();
+      } else if (await this.hasStagedChanges()) {
+        await this.commit(`noteai: organize ${change.operations.length} item${change.operations.length === 1 ? '' : 's'}`);
+        candidate = await this.head();
+      }
+
+      if (candidate && candidate !== remoteHead) {
+        this.updateJob(jobId, { candidate_commit: candidate, phase: 'pushing' });
+        this.setState({ state: 'syncing', phase: 'pushing' });
+        await this.pushAndVerify(candidate, remoteHead);
+      } else {
+        await this.verifyRemote(candidate);
+      }
+      await this.workspace.rebuildIndex(change.idByPath);
+      const generation = beforeState.generation + 1;
+      this.database.db.prepare("UPDATE repository_state SET local_head=?,remote_head=?,generation=?,verified_generation=?,dirty_count=0,state='verified',phase='completed',last_error='',verified_at=?,updated_at=? WHERE id=1").run(candidate, candidate, generation, generation, now(), now());
+      this.completeJob(jobId);
+      return this.status();
+    } catch (reason) {
+      if (mutated || (snapshot && snapshot !== base)) await this.restoreDirty(base, snapshot).catch(() => undefined);
+      await this.workspace.rebuildIndex().catch(() => undefined);
+      this.failJob(jobId, reason);
+      if (!(reconciledRemote && this.errorCode(reason) === 'REMOTE_CHANGED')) this.fail(reason);
+      throw reason;
+    }
   }
 
-  private requestRetry(delay: number) {
-    this.clearRetryTimer();
-    this.retryTimer = setTimeout(() => {
-      this.retryTimer = null;
-      this.deferredRequested = true;
-      void this.startSync();
-    }, delay);
+  private async applyTreeOperation(operation: TreeOperation) {
+    if (operation.type === 'create-folder') return this.workspace.createFolder(operation.path);
+    if (operation.type === 'move-file') {
+      const folder = operation.toFolder ? `${this.paths.safeFolder(operation.toFolder)}/` : '';
+      const target = `${folder}${basename(operation.fromPath)}`;
+      if (target === operation.fromPath) return;
+      return this.workspace.moveFile(operation.fromPath, target);
+    }
+    if (operation.type === 'move-folder' || operation.type === 'rename-folder') {
+      await this.workspace.assertManagedFolder(operation.fromPath);
+      return this.workspace.moveFolder(operation.fromPath, operation.toPath);
+    }
+    if (operation.type === 'delete-file') return this.workspace.removeFile(operation.path);
+    if (operation.type === 'delete-folder') {
+      await this.workspace.assertManagedFolder(operation.path);
+      return this.workspace.removeFolder(operation.path);
+    }
   }
 
-  private scheduleQuietSync() {
-    this.clearQuietTimer();
-    this.quietTimer = setTimeout(() => {
-      this.quietTimer = null;
-      this.deferredRequested = true;
-      void this.startSync();
-    }, quietSyncDelay);
+  private async fetchRemote() {
+    const branch = this.repository.branch();
+    const token = this.github.accessToken();
+    const remote = await this.lsRemote(branch, token);
+    if (remote) await this.git.run(['fetch', '--no-tags', 'origin', `refs/heads/${branch}:refs/remotes/origin/${branch}`], { cwd: this.workspace.root, token });
+    return remote;
   }
 
-  private ensureQuietSync() {
-    if (!this.quietTimer && !this.deferredRequested) this.scheduleQuietSync();
+  private async pushAndVerify(candidate: string, expectedRemote: string) {
+    const branch = this.repository.branch();
+    const token = this.github.accessToken();
+    try {
+      await this.git.run(['push', 'origin', `HEAD:refs/heads/${branch}`], { cwd: this.workspace.root, token });
+    } catch (reason) {
+      const actual = await this.lsRemote(branch, token).catch(() => '');
+      if (actual === candidate) return;
+      if (actual !== expectedRemote) throw new ConflictException({ code: 'PUSH_RACE', message: 'GitHub 在 push 前发生变化，本地修改已恢复并重新同步' });
+      throw reason;
+    }
+    this.setState({ state: 'syncing', phase: 'verifying' });
+    const verified = await this.lsRemote(branch, token);
+    if (verified !== candidate) throw new ConflictException({ code: 'REMOTE_VERIFY_FAILED', message: 'GitHub 远端 ref 校验失败，本次同步未确认成功' });
   }
 
-  private clearQuietTimer() {
-    if (!this.quietTimer) return;
-    clearTimeout(this.quietTimer);
-    this.quietTimer = null;
+  private async verifyRemote(candidate: string) {
+    const actual = await this.lsRemote(this.repository.branch(), this.github.accessToken());
+    if (actual !== candidate) throw new ConflictException({ code: 'PUSH_RACE', message: 'GitHub 在同步期间发生变化，本地状态未标记为已验证' });
   }
 
-  private clearRetryTimer() {
-    if (!this.retryTimer) return;
-    clearTimeout(this.retryTimer);
-    this.retryTimer = null;
+  private async cherryPickWithConflicts(snapshot: string, base: string, remote: string, jobId: string) {
+    try {
+      await this.git.run(['cherry-pick', snapshot], { cwd: this.workspace.root });
+      return this.head();
+    } catch (reason) {
+      const output = await this.git.run(['diff', '--name-only', '--diff-filter=U', '-z'], { cwd: this.workspace.root }).catch(() => '');
+      const paths = output.split('\0').filter(Boolean);
+      if (!paths.length) throw reason;
+      for (const path of paths) await this.resolveGitConflict(path, base, snapshot, remote, jobId);
+      await this.git.run(['cherry-pick', '--continue'], { cwd: this.workspace.root });
+      return this.head();
+    }
   }
 
-  private applyDecision(row: Record<string, string | null>) {
+  private async resolveGitConflict(path: string, base: string, local: string, remote: string, jobId: string) {
+    const safe = this.paths.safe(path);
+    const id = randomUUID();
+    const root = join(this.workspace.jobsRoot, 'conflicts', id);
+    await fs.mkdir(root, { recursive: true });
+    const baseFile = await this.checkoutStage(1, safe, join(root, 'base'));
+    const remoteFile = await this.checkoutStage(2, safe, join(root, 'remote'));
+    const localFile = await this.checkoutStage(3, safe, join(root, 'local'));
+    const copyPath = localFile ? await this.conflictCopyPath(safe, id) : '';
+
+    if (remoteFile) await this.git.run(['checkout', '--ours', '--', safe], { cwd: this.workspace.root });
+    else await this.git.run(['rm', '--ignore-unmatch', '--', safe], { cwd: this.workspace.root });
+    if (localFile && copyPath) {
+      await this.workspace.writeAtomic(copyPath, await fs.readFile(localFile));
+      await this.git.run(['add', '--', copyPath], { cwd: this.workspace.root });
+    }
+    await this.git.run(['add', '--all', '--', safe], { cwd: this.workspace.root });
+    const kind = this.workspace.indexByPath(safe)?.kind ?? (isText(safe) ? 'text' : extname(safe).slice(1));
+    this.database.db.prepare('INSERT INTO conflicts(id,job_id,path,copy_path,base_commit,local_commit,remote_commit,base_file,local_file,remote_file,kind,operation,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').run(
+      id, jobId, safe, copyPath, base, local, remote,
+      baseFile ? this.artifactRelative(baseFile) : '', localFile ? this.artifactRelative(localFile) : '', remoteFile ? this.artifactRelative(remoteFile) : '',
+      kind, !remoteFile ? 'create' : !localFile ? 'delete' : 'update', now(),
+    );
+  }
+
+  private async checkoutStage(stage: 1 | 2 | 3, path: string, root: string) {
+    await fs.mkdir(root, { recursive: true });
+    try {
+      await this.git.run(['checkout-index', `--stage=${stage}`, `--prefix=${root}/`, '--', path], { cwd: this.workspace.root });
+      const target = join(root, path);
+      return existsSync(target) ? target : '';
+    } catch {
+      return '';
+    }
+  }
+
+  private async applyDecision(row: Record<string, string | null>) {
     const action = row.resolution_action as ConflictAction;
-    const copy = row.resolution_copy_path;
-    if (action === 'use-remote' && copy) this.database.db.prepare('UPDATE notes SET dirty=1,deleted=1,revision=?,updated_at=? WHERE path=?').run(hash(`delete:${copy}:${now()}`), now(), copy);
-    if ((action === 'keep-local' || action === 'manual') && copy) {
-      const local = this.database.db.prepare('SELECT * FROM notes WHERE path=? AND deleted=0').get(copy) as NoteRow | undefined;
-      const content = action === 'manual' ? row.resolution_content ?? '' : local?.content ?? row.local_content ?? '';
-      const original = this.database.db.prepare('SELECT id FROM notes WHERE path=? AND deleted=0').get(row.path) as { id: string } | undefined;
-      if (original) this.database.db.prepare('UPDATE notes SET content=?,revision=?,title=?,dirty=1,deleted=0,updated_at=? WHERE id=?').run(content, hash(content), noteTitle(row.path ?? '', content), now(), original.id);
-      if (local) this.database.db.prepare('UPDATE notes SET deleted=1,dirty=1,revision=?,updated_at=? WHERE id=?').run(hash(`delete:${local.id}:${now()}`), now(), local.id);
+    const path = this.paths.safe(row.path ?? '');
+    const copyPath = row.copy_path ? this.paths.safe(row.copy_path) : '';
+    const localFile = row.local_file ? join(this.workspace.jobsRoot, row.local_file) : '';
+    if (action === 'keep-local') {
+      if (localFile && existsSync(localFile)) await this.workspace.writeAtomic(path, await fs.readFile(localFile));
+      else if (this.workspace.indexByPath(path)) await this.workspace.removeFile(path);
+      if (copyPath && this.workspace.indexByPath(copyPath)) await this.workspace.removeFile(copyPath);
+    } else if (action === 'use-remote') {
+      if (copyPath && this.workspace.indexByPath(copyPath)) await this.workspace.removeFile(copyPath);
+    } else if (action === 'manual') {
+      if (!isText(path)) throw new BadRequestException('二进制冲突不支持手动编辑');
+      await this.workspace.writeAtomic(path, Buffer.from(row.resolution_content ?? '', 'utf8'));
+      if (copyPath && this.workspace.indexByPath(copyPath)) await this.workspace.removeFile(copyPath);
     }
-    this.database.db.prepare('DELETE FROM conflicts WHERE id=?').run(row.id);
   }
 
-  private claims() {
-    return this.database.db.prepare('SELECT id,path,remote_path,content,revision,deleted FROM notes WHERE dirty=1 ORDER BY updated_at,id').all() as Claim[];
+  private async finishVerified(head: string, remoteAdvanced: boolean) {
+    const previous = this.workspace.indexRows();
+    const idByPath = new Map(previous.map((row) => [row.path, row.id]));
+    const previousHead = this.state().local_head;
+    if (previousHead && head && previousHead !== head) {
+      const renamed = await this.git.run(['diff', '--name-status', '-z', '-M', previousHead, head, '--'], { cwd: this.workspace.root }).catch(() => '');
+      const tokens = renamed.split('\0');
+      for (let index = 0; index < tokens.length; index += 1) {
+        if (!/^R\d+$/.test(tokens[index])) continue;
+        const fromPath = tokens[index + 1];
+        const toPath = tokens[index + 2];
+        const id = idByPath.get(fromPath);
+        if (id && toPath) idByPath.set(toPath, id);
+        index += 2;
+      }
+    }
+    await this.workspace.rebuildIndex(idByPath);
+    const current = this.state();
+    const generation = current.generation + (remoteAdvanced && current.dirty_count === 0 ? 1 : 0);
+    const state: SyncState = this.countConflicts() ? 'conflict' : 'verified';
+    this.database.db.prepare("UPDATE repository_state SET local_head=?,remote_head=?,generation=?,verified_generation=?,dirty_count=0,state=?,phase='completed',last_error='',verified_at=?,updated_at=? WHERE id=1").run(head, head, generation, generation, state, now(), now());
   }
 
-  private conflictPath(path: string, device: string, revision: string) {
-    const extension = extname(path) || '.md';
-    const directory = dirname(path);
-    const name = path.slice(directory === '.' ? 0 : directory.length + 1, -extension.length);
-    return `${directory === '.' ? '' : `${directory}/`}${name}（冲突-${device.slice(0, 6)}-${revision.slice(0, 8)}）${extension}`;
+  private async restoreDirty(base: string, snapshot: string) {
+    await this.git.run(['cherry-pick', '--abort'], { cwd: this.workspace.root }).catch(() => undefined);
+    if (!snapshot) return;
+    await this.git.run(['reset', '--hard', snapshot], { cwd: this.workspace.root });
+    if (base) {
+      await this.git.run(['reset', '--mixed', base], { cwd: this.workspace.root });
+    } else {
+      await this.git.run(['update-ref', '-d', 'HEAD'], { cwd: this.workspace.root }).catch(() => undefined);
+      await this.git.run(['rm', '--cached', '-r', '--ignore-unmatch', '.'], { cwd: this.workspace.root }).catch(() => undefined);
+    }
+    const snapshotPaths = new Set((await this.git.run(['ls-tree', '-r', '--name-only', '-z', snapshot], { cwd: this.workspace.root })).split('\0').filter(Boolean));
+    const status = await this.git.run(['status', '--porcelain=v1', '-z', '--untracked-files=all'], { cwd: this.workspace.root });
+    const cleanup = this.workspace.parseStatus(status)
+      .filter((entry) => entry.code === '??')
+      .flatMap((entry) => entry.paths)
+      .filter((path) => this.workspace.stageable(path) && !snapshotPaths.has(path));
+    if (cleanup.length) await this.git.run(['clean', '-f', '--', ...cleanup], { cwd: this.workspace.root });
   }
 
-  private workspace() {
-    return this.database.db.prepare('SELECT * FROM sync_workspace WHERE id=1').get() as WorkspaceRow;
+  private async recoverJobs() {
+    const jobs = this.database.db.prepare("SELECT * FROM sync_jobs WHERE state='running' ORDER BY created_at").all() as Array<Record<string, string>>;
+    if (!jobs.length || !this.workspace.exists()) return;
+    for (const job of jobs) {
+      const candidate = job.candidate_commit;
+      let snapshot = job.snapshot_commit;
+      const base = job.base_commit;
+      try {
+        const currentHead = await this.head();
+        if (!snapshot && currentHead && currentHead !== base && (job.type === 'sync' || job.phase === 'starting')) {
+          snapshot = currentHead;
+        }
+        const remote = this.repository.branch() && this.github.hasToken() ? await this.lsRemote(this.repository.branch(), this.github.accessToken()) : '';
+        if (candidate && remote) {
+          await this.git.run(['fetch', '--no-tags', 'origin', `refs/heads/${this.repository.branch()}:refs/remotes/origin/${this.repository.branch()}`], { cwd: this.workspace.root, token: this.github.accessToken() });
+          const contained = remote === candidate || await this.git.run(['merge-base', '--is-ancestor', candidate, remote], { cwd: this.workspace.root }).then(() => true).catch(() => false);
+          if (contained) {
+            await this.git.run(['reset', '--hard', remote], { cwd: this.workspace.root });
+            await this.finishVerified(remote, true);
+            this.completeJob(job.id);
+            continue;
+          }
+        }
+        if (snapshot) {
+          await this.restoreDirty(base, snapshot);
+          await this.discardJobConflicts(job.id);
+          this.failJob(job.id, new Error('服务重启后已恢复同步前的本地修改'));
+        } else if (job.type === 'management') {
+          await this.restoreManagementBase(base);
+          await this.discardJobConflicts(job.id);
+          this.failJob(job.id, new Error('服务重启后已撤销未完成的文件结构调整'));
+        } else {
+          await this.discardJobConflicts(job.id);
+          this.failJob(job.id, new Error('服务重启后已清理未完成同步任务'));
+        }
+      } catch (reason) {
+        this.failJob(job.id, reason);
+      }
+    }
   }
 
-  private setWorkspace(values: Partial<WorkspaceRow>) {
-    const entries = Object.entries({ ...values, updated_at: now() });
-    this.database.db.prepare(`UPDATE sync_workspace SET ${entries.map(([key]) => `${key}=?`).join(',')} WHERE id=1`).run(...entries.map(([, value]) => value));
+  private async restoreManagementBase(base: string) {
+    if (base) {
+      await this.restoreDirty(base, base);
+      return;
+    }
+    await this.git.run(['cherry-pick', '--abort'], { cwd: this.workspace.root }).catch(() => undefined);
+    await this.git.run(['rm', '--cached', '-r', '--ignore-unmatch', '.'], { cwd: this.workspace.root }).catch(() => undefined);
+    const status = await this.git.run(['status', '--porcelain=v1', '-z', '--untracked-files=all'], { cwd: this.workspace.root });
+    const cleanup = this.workspace.parseStatus(status).flatMap((entry) => entry.paths).filter((path) => this.workspace.stageable(path));
+    if (cleanup.length) await this.git.run(['clean', '-f', '--', ...cleanup], { cwd: this.workspace.root });
   }
 
-  private bumpGeneration() { this.database.db.prepare('UPDATE sync_workspace SET generation=generation+1,updated_at=? WHERE id=1').run(now()); }
-  private countDirty() { return (this.database.db.prepare('SELECT count(*) count FROM notes WHERE dirty=1').get() as { count: number }).count; }
-  private countConflicts() { return (this.database.db.prepare('SELECT count(*) count FROM conflicts').get() as { count: number }).count; }
-  private countDecisions() { return (this.database.db.prepare('SELECT count(*) count FROM conflicts WHERE resolution_action IS NOT NULL').get() as { count: number }).count; }
-  private derivedState(workspace: WorkspaceRow, dirty: number, conflicts: number): SyncState {
-    if (!this.repository.get()) return 'unconfigured';
-    if (!this.github.hasToken()) return 'unauthorized';
-    if (workspace.lock_until && workspace.lock_until > now()) return workspace.phase === 'fetching' ? 'checking' : 'syncing';
-    if (conflicts) return 'conflict';
-    if (dirty) return workspace.state === 'failed' ? 'failed' : 'pending';
-    return workspace.verified_generation === workspace.generation && workspace.verified_remote_head ? 'verified' : 'checking';
+  private async assertRepositorySafety() {
+    if (!this.workspace.exists()) throw new ConflictException({ code: 'WORKSPACE_NOT_READY', message: 'Git 工作区尚未初始化' });
+    const meta = await this.github.repository(this.repository.get());
+    const branch = this.repository.branch();
+    if (branch && meta.default_branch !== branch) {
+      throw new ConflictException({ code: 'DEFAULT_BRANCH_CHANGED', message: 'GitHub 默认分支已变化，请断开后重新选择仓库' });
+    }
+    const remoteUrl = (await this.git.run(['remote', 'get-url', 'origin'], { cwd: this.workspace.root })).trim();
+    if (remoteUrl !== this.github.cloneUrl(this.repository.get()) || /https:\/\/[^/\s]+@/i.test(remoteUrl)) {
+      throw new BadRequestException({ code: 'REMOTE_URL_INVALID', message: 'Git remote 与当前仓库不一致，需要重新选择仓库' });
+    }
   }
 
-  private acquireLock(token: string) {
-    const until = new Date(Date.now() + 5 * 60_000).toISOString();
-    const result = this.database.db.prepare("UPDATE sync_workspace SET lock_token=?,lock_until=?,state='checking',phase='fetching',updated_at=? WHERE id=1 AND (lock_until='' OR lock_until<?)").run(token, until, now(), now());
-    return result.changes === 1;
+  private async discardIncompleteRepository() {
+    this.repository.clear();
+    await this.workspace.clear();
+    await fs.rm(join(this.workspace.jobsRoot, 'conflicts'), { recursive: true, force: true });
+    this.database.db.transaction(() => {
+      this.database.db.prepare('DELETE FROM conflicts').run();
+      this.database.db.prepare('DELETE FROM sync_jobs').run();
+    })();
   }
-  private releaseLock(token: string) { this.database.db.prepare("UPDATE sync_workspace SET lock_token='',lock_until='',updated_at=? WHERE id=1 AND lock_token=?").run(now(), token); }
+
+  private async assertSafeStagePaths(paths: string[]) {
+    await this.workspace.assertRegularStagePaths(paths);
+    if (!paths.length) return;
+    const indexed = await this.git.run(['ls-files', '-s', '-z', '--', ...paths], { cwd: this.workspace.root });
+    const unsafe = indexed.split('\0').filter(Boolean).find((entry) => entry.startsWith('120000 ') || entry.startsWith('160000 '));
+    if (unsafe) throw new BadRequestException({ code: 'UNSUPPORTED_GIT_ENTRY', message: '不支持修改符号链接或子模块' });
+  }
+
+  private async configureIdentity() {
+    const login = this.github.login() || 'noteai';
+    const account = this.github.accountId() || '0';
+    await this.git.run(['config', '--local', 'user.name', login], { cwd: this.workspace.root });
+    await this.git.run(['config', '--local', 'user.email', `${account}+${login}@users.noreply.github.com`], { cwd: this.workspace.root });
+    await this.git.run(['config', '--local', 'commit.gpgsign', 'false'], { cwd: this.workspace.root });
+  }
+
+  private async head() {
+    try {
+      return (await this.git.run(['rev-parse', '--verify', 'HEAD'], { cwd: this.workspace.root })).trim();
+    } catch {
+      return '';
+    }
+  }
+
+  private async hasStagedChanges() {
+    const value = await this.git.run(['diff', '--cached', '--name-only', '-z'], { cwd: this.workspace.root });
+    return Boolean(value);
+  }
+
+  private async commit(message: string) {
+    await this.git.run(['commit', '--no-gpg-sign', '-m', message], { cwd: this.workspace.root });
+  }
+
+  private async lsRemote(branch: string, token: string) {
+    const output = await this.git.run(['ls-remote', '--heads', 'origin', `refs/heads/${branch}`], { cwd: this.workspace.root, token });
+    return output.trim().split(/\s+/)[0] ?? '';
+  }
+
+  private async lsRemoteUrl(url: string, branch: string, token: string) {
+    const output = await this.git.run(['ls-remote', '--heads', url, `refs/heads/${branch}`], { cwd: this.workspace.jobsRoot, token });
+    return output.trim().split(/\s+/)[0] ?? '';
+  }
+
+  private async keepJobRef(jobId: string, commit: string) {
+    await this.git.run(['update-ref', `refs/noteai/jobs/${jobId}/snapshot`, commit], { cwd: this.workspace.root });
+  }
+
+  private createJob(type: JobType, operations: TreeOperation[]) {
+    const id = randomUUID();
+    const base = this.state().local_head;
+    this.database.db.prepare("INSERT INTO sync_jobs(id,type,state,phase,base_commit,operations,created_at,updated_at) VALUES(?,?, 'running','starting',?,?,?,?)").run(id, type, base, JSON.stringify(operations), now(), now());
+    return id;
+  }
+
+  private updateJob(id: string, values: { snapshot_commit?: string; candidate_commit?: string; phase?: string }) {
+    const entries = Object.entries(values).filter(([, value]) => value !== undefined);
+    if (!entries.length) return;
+    this.database.db.prepare(`UPDATE sync_jobs SET ${entries.map(([key]) => `${key}=?`).join(',')},updated_at=? WHERE id=?`).run(...entries.map(([, value]) => value), now(), id);
+  }
+
+  private completeJob(id: string) {
+    this.database.db.prepare("UPDATE sync_jobs SET state='completed',phase='completed',error='',updated_at=? WHERE id=?").run(now(), id);
+    void this.git.run(['update-ref', '-d', `refs/noteai/jobs/${id}/snapshot`], { cwd: this.workspace.root }).catch(() => undefined);
+  }
+
+  private failJob(id: string, reason: unknown) {
+    this.database.db.prepare("UPDATE sync_jobs SET state='failed',phase='failed',error=?,updated_at=? WHERE id=?").run(this.message(reason), now(), id);
+  }
+
+  private async discardJobConflicts(jobId: string) {
+    const rows = this.database.db.prepare('SELECT id FROM conflicts WHERE job_id=?').all(jobId) as Array<{ id: string }>;
+    this.database.db.prepare('DELETE FROM conflicts WHERE job_id=?').run(jobId);
+    await Promise.all(rows.map((row) => fs.rm(join(this.workspace.jobsRoot, 'conflicts', row.id), { recursive: true, force: true })));
+  }
+
+  private fail(reason: unknown) {
+    const status = reason instanceof HttpException ? reason.getStatus() : 500;
+    const state: SyncState = status === 401 ? 'unauthorized' : status === 409 && this.countConflicts() ? 'conflict' : 'failed';
+    this.setState({ state, phase: 'failed', last_error: this.message(reason) });
+  }
+
+  private message(reason: unknown) {
+    if (reason instanceof HttpException) {
+      const response = reason.getResponse();
+      if (typeof response === 'string') return response;
+      const message = (response as { message?: string | string[] }).message;
+      return Array.isArray(message) ? message.join('；') : message ?? reason.message;
+    }
+    return reason instanceof Error ? reason.message : '未知同步错误';
+  }
+
+  private errorCode(reason: unknown) {
+    if (!(reason instanceof HttpException)) return '';
+    const response = reason.getResponse();
+    return typeof response === 'object' && response && 'code' in response ? String(response.code ?? '') : '';
+  }
+
+  private state() {
+    return this.database.db.prepare('SELECT * FROM repository_state WHERE id=1').get() as RepositoryStateRow;
+  }
+
+  private setState(values: Partial<Pick<RepositoryStateRow, 'state' | 'phase' | 'last_error' | 'local_head' | 'remote_head'>>) {
+    const entries = Object.entries(values);
+    if (!entries.length) return;
+    this.database.db.prepare(`UPDATE repository_state SET ${entries.map(([key]) => `${key}=?`).join(',')},updated_at=? WHERE id=1`).run(...entries.map(([, value]) => value), now());
+  }
+
+  private countConflicts() {
+    return (this.database.db.prepare('SELECT count(*) count FROM conflicts').get() as { count: number }).count;
+  }
+
+  private countDecisions() {
+    return (this.database.db.prepare('SELECT count(*) count FROM conflicts WHERE resolution_action IS NOT NULL').get() as { count: number }).count;
+  }
+
+  private artifactRelative(path: string) {
+    return path.slice(this.workspace.jobsRoot.length + 1);
+  }
+
+  private async readArtifact(path: string | null) {
+    if (!path) return null;
+    return fs.readFile(join(this.workspace.jobsRoot, path), 'utf8').catch(() => null);
+  }
+
+  private artifactSize(id: string, stage: 'local' | 'remote') {
+    const row = this.database.db.prepare(`SELECT ${stage}_file file FROM conflicts WHERE id=?`).get(id) as { file?: string } | undefined;
+    if (!row?.file) return 0;
+    try {
+      return statSync(join(this.workspace.jobsRoot, row.file)).size;
+    } catch {
+      return 0;
+    }
+  }
+
+  private async conflictCopyPath(path: string, id: string) {
+    const extension = extname(path);
+    const stem = basename(path, extension);
+    const folder = dirname(path);
+    const prefix = folder === '.' ? '' : `${folder}/`;
+    let candidate = `${prefix}${stem}（冲突-${id.slice(0, 8)}）${extension}`;
+    let index = 2;
+    while (this.workspace.indexByPath(candidate) || existsSync(this.workspace.file(candidate))) {
+      candidate = `${prefix}${stem}（冲突-${id.slice(0, 8)}-${index++}）${extension}`;
+    }
+    return candidate;
+  }
 }

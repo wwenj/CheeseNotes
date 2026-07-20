@@ -2,25 +2,15 @@ import { request } from './http';
 
 export type SyncStatus = {
   state: 'unconfigured' | 'unauthorized' | 'checking' | 'pending' | 'syncing' | 'verified' | 'conflict' | 'failed';
-  phase: 'idle' | 'fetching' | 'merging' | 'committing' | 'verifying' | 'completed' | 'failed';
-  currentPath: string;
-  processedFiles: number;
-  totalFiles: number;
-  processedBytes: number;
-  totalBytes: number;
-  pendingCount: number;
+  phase: 'idle' | 'cloning' | 'fetching' | 'merging' | 'committing' | 'pushing' | 'verifying' | 'completed' | 'failed';
+  dirtyCount: number;
   conflictCount: number;
-  resolutionDraftCount: number;
-  syncBlockedByConflicts: boolean;
-  lastSuccessAt: string;
+  generation: number;
+  verifiedGeneration: number;
+  remoteHead: string;
+  verifiedAt: string;
   lastError: string;
   manualSyncAvailable: boolean;
-  dirtyCount?: number;
-  lastRemoteHead?: string;
-  verifiedRemoteHead?: string;
-  localGeneration?: number;
-  verifiedGeneration?: number;
-  nextRetryAt?: string;
 };
 
 export type ConflictAction = 'keep-both' | 'keep-local' | 'use-remote' | 'manual';

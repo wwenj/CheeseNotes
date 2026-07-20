@@ -1,4 +1,4 @@
-export type Panel = 'vault' | 'sync' | 'settings';
+export type Panel = 'vault' | 'sync' | 'settings' | 'manage';
 export type ArticleMode = 'read' | 'write';
 
 export type Draft = {

@@ -1,9 +1,8 @@
 import { BadRequestException, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
-import { Buffer } from 'node:buffer';
 import { getSetting, setSetting } from '../../common/database-settings.js';
 import { wait } from '../../common/time.js';
 import { DatabaseService } from '../database/database.service.js';
-import type { RepoMeta, TreeEntry } from './contracts/github.types.js';
+import type { RepoMeta } from './contracts/github.types.js';
 
 export type GitHubAccount = {
   id: string;
@@ -34,6 +33,12 @@ export class GitHubService {
     return getSetting(this.database.db, 'github_account_id');
   }
 
+  accessToken() {
+    const token = getSetting(this.database.db, 'github_access_token');
+    if (!token || !this.accountId()) throw new UnauthorizedException('请先连接 GitHub');
+    return token;
+  }
+
   hasConnectionFor(githubId: string) {
     return this.hasToken() && this.accountId() === githubId;
   }
@@ -48,6 +53,10 @@ export class GitHubService {
     setSetting(this.database.db, 'github_access_token', token);
     setSetting(this.database.db, 'github_login', account.login);
     setSetting(this.database.db, 'github_account_id', account.id);
+  }
+
+  cloneUrl(fullName: string) {
+    return `https://github.com/${fullName}.git`;
   }
 
   async user() {
@@ -65,93 +74,11 @@ export class GitHubService {
     return repo;
   }
 
-  async tree(fullName: string, ref: string): Promise<TreeEntry[]> {
-    const recursive = await this.json<{ tree: TreeEntry[]; truncated: boolean }>(`/repos/${fullName}/git/trees/${encodeURIComponent(ref)}?recursive=1`);
-    if (!recursive.truncated) return recursive.tree;
-    const root = await this.json<{ sha: string }>(`/repos/${fullName}/git/trees/${encodeURIComponent(ref)}`);
-    const entries: TreeEntry[] = [];
-    const visit = async (sha: string, prefix = ''): Promise<void> => {
-      const result = await this.json<{ tree: TreeEntry[] }>(`/repos/${fullName}/git/trees/${sha}`);
-      for (const entry of result.tree) {
-        const path = prefix ? `${prefix}/${entry.path}` : entry.path;
-        if (entry.type === 'tree') await visit(entry.sha, path);
-        else entries.push({ ...entry, path });
-      }
-    };
-    await visit(root.sha);
-    return entries;
-  }
-
-  async head(fullName: string, branch: string) {
-    const result = await this.json<{ object: { sha: string } }>(`/repos/${fullName}/git/ref/heads/${encodeURIComponent(branch)}`);
-    return result.object.sha;
-  }
-
-  async commit(fullName: string, sha: string) {
-    return this.json<{ tree: { sha: string } }>(`/repos/${fullName}/git/commits/${sha}`);
-  }
-
-  async createBlob(fullName: string, content: string) {
-    const result = await this.json<{ sha: string }>(`/repos/${fullName}/git/blobs`, {
-      method: 'POST', body: JSON.stringify({ content, encoding: 'utf-8' }),
-    });
-    return result.sha;
-  }
-
-  async createTree(fullName: string, baseTree: string, entries: Array<{ path: string; sha: string | null }>) {
-    const result = await this.json<{ sha: string }>(`/repos/${fullName}/git/trees`, {
-      method: 'POST',
-      body: JSON.stringify({ base_tree: baseTree, tree: entries.map((entry) => ({ path: entry.path, mode: '100644', type: 'blob', sha: entry.sha })) }),
-    });
-    return result.sha;
-  }
-
-  async createCommit(fullName: string, message: string, tree: string, parent: string) {
-    const result = await this.json<{ sha: string }>(`/repos/${fullName}/git/commits`, {
-      method: 'POST', body: JSON.stringify({ message, tree, parents: [parent] }),
-    });
-    return result.sha;
-  }
-
-  async updateRef(fullName: string, branch: string, sha: string) {
-    try {
-      await this.json(`/repos/${fullName}/git/refs/heads/${encodeURIComponent(branch)}`, {
-        method: 'PATCH', body: JSON.stringify({ sha, force: false }),
-      });
-      return true;
-    } catch (error) {
-      if (error instanceof GitHubError && error.status === 422) return false;
-      throw error;
-    }
-  }
-
-  async raw(fullName: string, path: string, ref: string) {
-    const safePath = path.split('/').map(encodeURIComponent).join('/');
-    const response = await this.request(`/repos/${fullName}/contents/${safePath}?ref=${encodeURIComponent(ref)}`, { headers: { Accept: 'application/vnd.github.raw+json' } });
-    return Buffer.from(await response.arrayBuffer());
-  }
-
-  async put(fullName: string, branch: string, path: string, content: string, sha?: string | null) {
-    const safePath = path.split('/').map(encodeURIComponent).join('/');
-    const result = await this.json<{ content: { sha: string } }>(`/repos/${fullName}/contents/${safePath}`, {
-      method: 'PUT',
-      body: JSON.stringify({ message: `note-service: ${sha ? 'update' : 'create'} ${path}`, content: Buffer.from(content).toString('base64'), branch, ...(sha ? { sha } : {}) }),
-    });
-    return result.content.sha;
-  }
-
-  async remove(fullName: string, branch: string, path: string, sha: string) {
-    const safePath = path.split('/').map(encodeURIComponent).join('/');
-    await this.json(`/repos/${fullName}/contents/${safePath}`, { method: 'DELETE', body: JSON.stringify({ message: `note-service: delete ${path}`, branch, sha }) });
-  }
-
   async accountForToken(token: string, includeEmails = false): Promise<GitHubAccount> {
     const response = await fetch('https://api.github.com/user', { headers: this.headers(token) });
     const payload = await response.json().catch(() => ({})) as { id?: number; login?: string; avatar_url?: string | null; message?: string };
     if (!response.ok || !payload.login || !payload.id) throw new UnauthorizedException(payload.message || 'GitHub Token 无效');
-    const emails = includeEmails
-      ? await this.emailsForToken(token)
-      : [];
+    const emails = includeEmails ? await this.emailsForToken(token) : [];
     return { id: String(payload.id), login: payload.login, avatarUrl: payload.avatar_url ?? null, emails };
   }
 
@@ -166,13 +93,7 @@ export class GitHubService {
     return payload.access_token;
   }
 
-  private token() {
-    const token = getSetting(this.database.db, 'github_access_token');
-    if (!token || !this.accountId()) throw new UnauthorizedException('请先连接 GitHub');
-    return token;
-  }
-
-  private headers(token = this.token()) {
+  private headers(token = this.accessToken()) {
     return { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'note-service' };
   }
 

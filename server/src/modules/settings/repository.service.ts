@@ -1,5 +1,5 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
-import { getSetting, setSetting } from '../../common/database-settings.js';
+import { now } from '../../common/time.js';
 import { DatabaseService } from '../database/database.service.js';
 
 @Injectable()
@@ -7,43 +7,34 @@ export class RepositoryService {
   constructor(@Inject(DatabaseService) private readonly database: DatabaseService) {}
 
   get() {
-    const stored = getSetting(this.database.db, 'repository');
-    if (!stored) return '';
-    try {
-      return this.normalize(stored);
-    } catch {
-      return stored;
-    }
+    return this.row().repository;
   }
 
   branch() {
-    return getSetting(this.database.db, 'repository_branch');
-  }
-
-  initialized() {
-    return getSetting(this.database.db, 'repository_initialized') === '1';
+    return this.row().branch;
   }
 
   set(value: string) {
-    const normalized = this.normalize(value);
-    setSetting(this.database.db, 'repository', normalized);
-    setSetting(this.database.db, 'repository_branch', '');
-    setSetting(this.database.db, 'repository_initialized', '0');
-    return normalized;
+    const repository = this.normalize(value);
+    this.database.db.prepare("UPDATE repository_state SET repository=?,branch='',local_head='',remote_head='',generation=0,verified_generation=-1,dirty_count=0,state='checking',phase='fetching',last_error='',verified_at='',updated_at=? WHERE id=1").run(repository, now());
+    return repository;
+  }
+
+  bind(repository: string, branch: string, head: string) {
+    this.database.db.prepare("UPDATE repository_state SET repository=?,branch=?,local_head=?,remote_head=?,generation=0,verified_generation=0,dirty_count=0,state='verified',phase='completed',last_error='',verified_at=?,updated_at=? WHERE id=1").run(repository, branch, head, head, now(), now());
   }
 
   clear() {
-    setSetting(this.database.db, 'repository', '');
-    setSetting(this.database.db, 'repository_branch', '');
-    setSetting(this.database.db, 'repository_initialized', '0');
+    this.database.db.prepare("UPDATE repository_state SET repository='',branch='',local_head='',remote_head='',generation=0,verified_generation=-1,dirty_count=0,state='unconfigured',phase='idle',last_error='',verified_at='',lock_token='',updated_at=? WHERE id=1").run(now());
   }
 
-  setBranch(value: string) {
-    setSetting(this.database.db, 'repository_branch', value);
-  }
-
-  markInitialized() {
-    setSetting(this.database.db, 'repository_initialized', '1');
+  private row() {
+    return this.database.db.prepare('SELECT repository,branch,local_head,remote_head FROM repository_state WHERE id=1').get() as {
+      repository: string;
+      branch: string;
+      local_head: string;
+      remote_head: string;
+    };
   }
 
   private normalize(value: string) {

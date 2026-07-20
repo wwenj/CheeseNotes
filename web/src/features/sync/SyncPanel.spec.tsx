@@ -20,8 +20,8 @@ vi.mock('../../api', () => ({
 }));
 
 const status = (overrides: Partial<SyncStatus> = {}): SyncStatus => ({
-  state: 'conflict', phase: 'idle', currentPath: '', processedFiles: 0, totalFiles: 0, processedBytes: 0, totalBytes: 0,
-  pendingCount: 0, conflictCount: 1, resolutionDraftCount: 0, syncBlockedByConflicts: true, lastSuccessAt: '', lastError: '', manualSyncAvailable: false,
+  state: 'conflict', phase: 'idle', dirtyCount: 0, conflictCount: 1, generation: 1, verifiedGeneration: 1,
+  remoteHead: 'head', verifiedAt: '', lastError: '', manualSyncAvailable: false,
   ...overrides,
 });
 
@@ -65,8 +65,8 @@ describe('SyncPanel', () => {
 
   it('选择全部处理方式后，最后一次点击同时保存并开始处理', async () => {
     api.conflicts.mockResolvedValue({ items: [conflict()], nextCursor: null, total: 1, resolutionDraftCount: 0 });
-    api.saveAllDecisions.mockResolvedValue({ ok: true, sync: status({ resolutionDraftCount: 1 }) });
-    api.applyDecisions.mockResolvedValue(status({ state: 'syncing', phase: 'merging', resolutionDraftCount: 1 }));
+    api.saveAllDecisions.mockResolvedValue({ ok: true, sync: status() });
+    api.applyDecisions.mockResolvedValue(status({ state: 'syncing', phase: 'merging' }));
     const user = userEvent.setup();
     renderPanel();
 
@@ -83,7 +83,7 @@ describe('SyncPanel', () => {
   it('允许为单条冲突直接选择三种方式之一', async () => {
     const item = conflict();
     api.conflicts.mockResolvedValue({ items: [item], nextCursor: null, total: 1, resolutionDraftCount: 0 });
-    api.saveDecision.mockResolvedValue({ ok: true, conflict: detail({ resolution_action: 'keep-local' }), sync: status({ resolutionDraftCount: 1 }) });
+    api.saveDecision.mockResolvedValue({ ok: true, conflict: detail({ resolution_action: 'keep-local' }), sync: status() });
     const user = userEvent.setup();
     renderPanel();
 

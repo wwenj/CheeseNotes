@@ -14,8 +14,9 @@ const workspace = vi.hoisted(() => ({
   resetEditor: vi.fn(), reload: vi.fn(), setNotice: vi.fn(), setError: vi.fn(), setSync: vi.fn(),
   loadFile: vi.fn(), revealFolder: vi.fn(), createNote: vi.fn(), toggleFolder: vi.fn(), collapseAllFolders: vi.fn(), expandAllFolders: vi.fn(),
   createFolder: vi.fn(), runSync: vi.fn(), chooseRepository: vi.fn(), clearReadingCache: vi.fn(), disconnect: vi.fn(),
+  applyTreeChanges: vi.fn(), moveCurrentFile: vi.fn(), deleteCurrentFile: vi.fn(),
   updateDraftContent: vi.fn(), flushCurrentDraft: vi.fn(), changeArticleMode: vi.fn(), retryDocumentUpdate: vi.fn(), setSheetOpen: vi.fn(),
-  copyArticle: vi.fn(), deleteCurrentArticle: vi.fn(),
+  copyArticle: vi.fn(),
   loading: false, auth: { connected: true, login: 'man', repository: 'man/notes' }, repository: 'man/notes',
   files: [], folders: [], selected: null, note: null, draft: null, expanded: new Set<string>(), sync: null,
   error: null, notice: null, clientSettings: { readerFontSize: 18 }, articleMode: 'read', documentRefresh: null, sheetOpen: false,
@@ -35,12 +36,13 @@ vi.mock('./app/routes', () => ({
 vi.mock('./components/feedback/Toast', () => ({ default: () => <div /> }));
 vi.mock('./components/layout/WorkspaceShell', () => ({ default: ({ children }: { children: React.ReactNode }) => <div data-testid="workspace-shell">{children}</div> }));
 vi.mock('./features/reader/ReaderViews', () => ({
-  ArticleActionSheet: () => <div />, ArticleToolbar: () => <div />, DocumentView: () => <div />,
+  FileActionSheet: () => <div />, DocumentToolbar: () => <div />, DocumentView: () => <div />,
 }));
 vi.mock('./features/settings/RepositorySettings', () => ({
   default: ({ onClearAuthenticatorAccess }: { onClearAuthenticatorAccess: () => Promise<void> }) => <button type="button" onClick={() => void onClearAuthenticatorAccess()}>测试退出验证</button>,
 }));
 vi.mock('./features/sync/SyncPanel', () => ({ default: () => <div /> }));
+vi.mock('./features/manage/FileManagement', () => ({ default: () => <div /> }));
 
 beforeEach(() => {
   vi.clearAllMocks();

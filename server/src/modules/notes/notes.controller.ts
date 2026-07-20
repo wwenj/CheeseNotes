@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Inject, Post, Put, Query, Req, Res } fro
 import { createReadStream, promises as fs } from 'node:fs';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { CreateFolderDto, DeleteNoteDto, SaveNoteDto } from './contracts/notes.dto.js';
+import { TreeChangesDto } from './contracts/tree.dto.js';
 import { NoteService } from './note.service.js';
 
 export function parseByteRange(value: string | undefined, size: number) {
@@ -23,6 +24,16 @@ export class NotesController {
   @Get('tree')
   async tree() {
     return this.notes.tree();
+  }
+
+  @Get('tree/management')
+  async managementTree() {
+    return this.notes.managementTree();
+  }
+
+  @Post('tree/changes')
+  async treeChanges(@Body() dto: TreeChangesDto) {
+    return this.notes.applyTreeChanges(dto.baseTreeVersion, dto.operations);
   }
 
   @Get('notes/content')

@@ -11,8 +11,8 @@ vi.mock('./ExplorerTools', () => ({ default: () => <div /> }));
 afterEach(() => cleanup());
 
 const conflictSync: SyncStatus = {
-  state: 'conflict', phase: 'idle', currentPath: '', processedFiles: 0, totalFiles: 0, processedBytes: 0, totalBytes: 0,
-  pendingCount: 0, conflictCount: 3, resolutionDraftCount: 1, syncBlockedByConflicts: true, lastSuccessAt: '', lastError: '', manualSyncAvailable: false,
+  state: 'conflict', phase: 'idle', dirtyCount: 0, conflictCount: 3, generation: 1, verifiedGeneration: 1,
+  remoteHead: 'head', verifiedAt: '', lastError: '', manualSyncAvailable: false,
 };
 
 describe('Explorer sync status', () => {

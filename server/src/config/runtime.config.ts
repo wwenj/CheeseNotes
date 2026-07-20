@@ -71,7 +71,9 @@ export const runtimeConfig = (): RuntimeConfig => {
   const corsOriginSetting = process.env.CORS_ORIGINS ?? 'capacitor://localhost';
   const corsOrigins = [...new Set([new URL(oauth.homepageUrl).origin, ...corsOriginSetting.split(',').map((value) => value.trim()).filter(Boolean)])];
   return {
-    dataRoot: existsSync('/.dockerenv') ? '/var/lib/note-service' : resolve(process.cwd(), '..', '.runtime'),
+    dataRoot: process.env.NOTEAI_DATA_ROOT
+      ? resolve(process.env.NOTEAI_DATA_ROOT)
+      : existsSync('/.dockerenv') ? '/var/lib/note-service' : resolve(process.cwd(), '..', '.runtime'),
     serviceDir: 'note-service',
     port: Number(process.env.PORT || 3000),
     host: process.env.HOST || '0.0.0.0',

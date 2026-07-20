@@ -10,7 +10,18 @@ npm run start:dev
 
 GitHub OAuth 凭据仅保存在 `server/config/github-oauth.local.json`，该文件被 Git 忽略。首次部署时从 `server/config/github-oauth.example.json` 复制并填写本地、生产两套 OAuth App 信息；客户端只需点击连接 GitHub，不需要也不会接触 Client Secret。GitHub OAuth App 的 Authorization callback URL 分别使用配置文件中的 `authorizationCallbackUrl`。
 
-服务只读取仓库当前默认分支，不会 clone Git 历史。文本笔记先在 SQLite 事务中持久化，再由单一同步 Worker 以 GitHub Git Data API 原子提交并逐字节回读验证；未验证前不会显示“已同步”。文件系统只缓存媒体资源和旧数据迁移来源。本地开发数据在 `note-service/.runtime`，Docker 内固定为 `/var/lib/note-service`。授权成功后的 GitHub Access Token 仅明文保存在当前服务本机的 SQLite 中，不会返回或存入 Web 页面。
+服务端会完整 clone 绑定时的 GitHub 默认分支，真实 Git working tree 是文本、图片、PDF 和音视频的唯一服务端内容副本。保存先原子写入 working tree，随后由单一同步协调器通过标准 `fetch/add/commit/cherry-pick/push` 完成 fast-forward 同步，并以远端 ref 验证结果；未验证前不会显示“已同步”。SQLite 只保存索引、仓库状态、任务、冲突元数据、设置和凭据，不保存文件正文。
+
+本地开发数据默认位于仓库根目录 `.runtime`，Docker 内固定为 `/var/lib/note-service`：
+
+```text
+/var/lib/note-service/
+├── meta/noteai-git.sqlite
+├── repository/              # 包含 .git 的真实 working tree
+└── git-jobs/                # 崩溃恢复和冲突临时文件
+```
+
+新架构不读取或迁移旧 `meta/notes.sqlite`。检测到旧数据库时会拒绝启动；升级部署必须先停止旧服务并清空旧运行数据，本地开发切换时同样需要清空 `.runtime`，随后再从 GitHub 重新 clone。GitHub Access Token 仅保存在服务端 SQLite，通过临时 `GIT_ASKPASS` 环境交给 Git 子进程，不写入 remote URL、Git config、命令参数或日志。
 
 服务端模块划分、依赖方向和接口契约见 [server/ARCHITECTURE.md](server/ARCHITECTURE.md)。
 
@@ -24,4 +35,4 @@ pnpm install
 pnpm dev
 ```
 
-开发服务器会将 `/api` 请求转发到 `http://localhost:3000`。生产环境执行 `docker compose -f deploy/docker-compose.yml up --build -d` 时，会自动构建 Web 页面并由同一服务根路径提供；同域访问无需填写服务地址。
+开发服务器会将 `/api` 请求转发到 `http://localhost:3000`。生产镜像可在仓库根目录执行 `docker build -f server/Dockerfile -t noteai .` 构建；镜像会自动构建 Web 页面并由同一服务根路径提供，同域访问无需填写服务地址。运行时必须把持久卷挂载到 `/var/lib/note-service`。

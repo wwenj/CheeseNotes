@@ -5,6 +5,13 @@ export type Note = { id?: string; path: string; content: string; revision: strin
 export type SaveResult = { id: string; path: string; revision: string; sync?: unknown };
 export type FolderResult = { path: string; sync: unknown };
 export type NoteTreeResult = { files: NoteSummary[]; folders: string[] };
+export type ManagementTree = NoteTreeResult & { treeVersion: string };
+export type TreeOperation =
+  | { type: 'move-file'; id: string; fromPath: string; toFolder: string; revision: string }
+  | { type: 'move-folder'; fromPath: string; toPath: string }
+  | { type: 'delete-file'; id: string; path: string; revision: string }
+  | { type: 'delete-folder'; path: string; recursive?: boolean };
+export type TreeChangesResult = ManagementTree & { sync: unknown };
 
 async function tree(signal?: AbortSignal): Promise<NoteTreeResult> {
   return request<NoteTreeResult>('tree', { signal, cache: 'no-store' });
@@ -12,6 +19,8 @@ async function tree(signal?: AbortSignal): Promise<NoteTreeResult> {
 
 export const notesApi = {
   tree,
+  managementTree: () => request<ManagementTree>('tree/management', { cache: 'no-store' }),
+  applyTreeChanges: (baseTreeVersion: string, operations: TreeOperation[]) => request<TreeChangesResult>('tree/changes', { method: 'POST', body: JSON.stringify({ baseTreeVersion, operations }) }),
   content: (path: string, signal?: AbortSignal) => request<Note>(`notes/content?path=${encodeURIComponent(path)}`, { signal }),
   search: (q: string) => request<NoteSummary[]>(`search?q=${encodeURIComponent(q)}`),
   create: (path: string, content: string, id?: string) => request<SaveResult>('notes', { method: 'POST', body: JSON.stringify({ path, content, ...(id ? { id } : {}) }) }),

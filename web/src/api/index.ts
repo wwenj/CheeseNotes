@@ -3,7 +3,7 @@ export type { AccessRequiredDetail, AuthorizedFetchResult } from './http';
 export { accessApi } from './access';
 export type { AccessStatus, AccessVerification } from './access';
 export { notesApi } from './notes';
-export type { FolderResult, Note, NoteSummary } from './notes';
+export type { FolderResult, ManagementTree, Note, NoteSummary, NoteTreeResult, TreeChangesResult, TreeOperation } from './notes';
 export { syncApi } from './sync';
 export type { ConflictAction, ConflictDetail, ConflictOperation, ConflictPage, ConflictReview, SyncConflict, SyncStatus } from './sync';
 export { settingsApi } from './settings';
