@@ -2,7 +2,7 @@ import { request } from './http';
 
 export type SyncStatus = {
   state: 'unconfigured' | 'unauthorized' | 'checking' | 'pending' | 'syncing' | 'verified' | 'conflict' | 'failed';
-  phase: 'idle' | 'checking-repository' | 'checking-remote' | 'preparing-workspace' | 'cloning' | 'fetching' | 'merging' | 'committing' | 'pushing' | 'verifying' | 'completed' | 'failed';
+  phase: 'idle' | 'checking-repository' | 'checking-remote' | 'preparing-workspace' | 'cloning' | 'configuring-workspace' | 'indexing-workspace' | 'fetching' | 'merging' | 'committing' | 'pushing' | 'verifying' | 'completed' | 'failed';
   dirtyCount: number;
   conflictCount: number;
   generation: number;

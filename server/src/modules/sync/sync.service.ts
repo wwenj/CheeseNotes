@@ -285,8 +285,10 @@ export class SyncService implements OnModuleInit {
         await this.git.run(['init', `--initial-branch=${branch}`], { cwd: this.workspace.root });
         await this.git.run(['remote', 'add', 'origin', cloneUrl], { cwd: this.workspace.root });
       }
+      this.setState({ state: 'checking', phase: 'configuring-workspace' });
       await this.configureIdentity();
       await this.assertRepositorySafety();
+      this.setState({ state: 'checking', phase: 'indexing-workspace' });
       await this.workspace.rebuildIndex();
       const head = await this.head();
       this.repository.bind(fullName, branch, head || remoteHead);
