@@ -57,7 +57,7 @@ async function fixture(options: { empty?: boolean; repositoryError?: Error } = {
       if (options.repositoryError) throw options.repositoryError;
       return { full_name: 'owner/notes', default_branch: 'main', permissions: { push: true } };
     },
-    cloneUrl: () => remote,
+    cloneUrl: () => `file://${remote}`,
   } as unknown as GitHubService;
   const sync = new SyncService(database, paths, repository, github, processGit, workspace);
   const notes = new NoteService(database, paths, workspace, sync);
@@ -93,6 +93,14 @@ describe('真实 Git working tree', () => {
     });
     expect(repository.get()).toBe('');
     expect(workspace.exists()).toBe(false);
+    database.db.close();
+  });
+
+  it('首次绑定只克隆默认分支当前版本，不下载完整历史', async () => {
+    const { database, workspace } = await fixture();
+
+    expect(await git(workspace.root, 'rev-list', '--count', 'HEAD')).toBe('1');
+    await expect(readFile(join(workspace.root, '.git', 'shallow'), 'utf8')).resolves.toMatch(/[0-9a-f]{40}/);
     database.db.close();
   });
 

@@ -123,7 +123,7 @@ export function InitializationProgress({ sync, onRetry }: { sync: SyncStatus; on
     'checking-repository': '正在确认 GitHub 仓库存在且具有写入权限',
     'checking-remote': '正在读取默认分支的远端 Git ref',
     'preparing-workspace': '正在清理并准备本地 Git 工作区',
-    cloning: '正在克隆仓库默认分支',
+    cloning: '正在克隆默认分支的当前版本',
     'configuring-workspace': '正在配置本地 Git 用户和远端地址',
     'indexing-workspace': '正在扫描仓库文件并建立 NoteAI 索引',
     fetching: '正在读取 GitHub 最新版本',
@@ -144,7 +144,7 @@ export function InitializationProgress({ sync, onRetry }: { sync: SyncStatus; on
   ] as const;
 
   return <section className="setup-card progress-card">
-    <h1>同步完整 Git 仓库</h1>
+    <h1>同步仓库当前版本</h1>
     <div className="initial-sync-status" aria-live="polite">
       <LoaderCircle className="spin" size={17} />
       <div><strong>{phaseText[sync.phase]}</strong><span>{phaseDetail[sync.phase]}</span></div>

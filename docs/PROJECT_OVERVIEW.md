@@ -68,7 +68,7 @@ NoteAI 面向希望长期拥有、组织和使用自己笔记的人。它不是�
 1. 用户打开客户端，先通过 Authenticator 的 6 位动态码验证设备。
 2. 通过 GitHub OAuth 授权，服务端获取仓库读写能力；客户端不接触 Client Secret 或 GitHub Access Token。
 3. 用户从有 `push` 权限的仓库中选择一个笔记库。
-4. 服务端完整 clone 该仓库当前默认分支，将支持的文件纳入索引。
+4. 服务端以 `depth=1` clone 该仓库默认分支的当前版本，将支持的文件纳入索引。
 5. 客户端加载文件树，用户可直接阅读、搜索和创建 Markdown 笔记。
 
 ### 3.2 日常编辑
@@ -112,7 +112,7 @@ NoteAI 面向希望长期拥有、组织和使用自己笔记的人。它不是�
 - 顶部控制区固定悬浮，正文排版保持克制，标题与正文之间只有浅分割线；
 - 最近访问文章会保存在客户端设置中，方便回到上次阅读位置。
 
-媒体文件并不被当成笔记正文写入。它们随完整 Git clone 直接存在 working tree，并由服务端流式读取；视频和音频接口支持 HTTP Range，适合流式加载与拖动播放。
+媒体文件并不被当成笔记正文写入。它们随默认分支当前版本直接存在 working tree，并由服务端流式读取；视频和音频接口支持 HTTP Range，适合流式加载与拖动播放。
 
 ### 4.3 写作体验：Markdown 源码与实时视觉反馈并存
 
@@ -225,7 +225,7 @@ OAuth 成功得到的 GitHub Access Token 仅保存在服务端 SQLite settings 
 
 ### 7.3 从 GitHub 拉到服务端
 
-首次绑定执行完整 `--single-branch --no-tags` clone，不使用 shallow clone。后续同步执行 `git fetch origin`：working tree 干净时直接更新到远端 HEAD；存在本地 snapshot 时，以远端 HEAD 为基线 cherry-pick snapshot。远端默认分支发生变化时要求重新选择仓库，不静默换分支。
+首次绑定执行 `--depth=1 --single-branch --no-tags` shallow clone，只下载默认分支当前版本，远端完整历史不受影响。后续同步执行 `git fetch origin`：working tree 干净时直接更新到远端 HEAD；存在本地 snapshot 时，以远端 HEAD 为基线 cherry-pick snapshot。远端默认分支发生变化时要求重新选择仓库，不静默换分支。
 
 ### 7.4 从服务端推到 GitHub
 
@@ -310,7 +310,7 @@ Capacitor 打包的是独立的 `www/` 产物。线上服务需允许 `capacitor
 当前实现有意保持以下边界：
 
 - 以个人单服务、单工作副本为目标，不是多人实时协同编辑器；
-- 同步完整 clone 绑定时的默认分支，但产品界面不展示完整 Git 历史；
+- 首次同步只 shallow clone 绑定时默认分支的当前版本，产品界面不展示完整 Git 历史；
 - 空文件夹通过隐藏 `.gitkeep` 进入 Git 历史；
 - 不支持 Git LFS、子模块和符号链接文件；
 - 写作仅开放 Markdown，媒体以读取和预览为主；

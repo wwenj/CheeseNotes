@@ -29,7 +29,7 @@ export type ManagementCommit = {
 
 type JobType = 'sync' | 'management';
 const quietSyncDelay = 10 * 60_000;
-const cloneTimeout = 30 * 60_000;
+const cloneTimeout = 2 * 60 * 60_000;
 
 @Injectable()
 export class SyncService implements OnModuleInit {
@@ -279,7 +279,7 @@ export class SyncService implements OnModuleInit {
       await this.workspace.clear();
       if (remoteHead) {
         this.setState({ state: 'checking', phase: 'cloning' });
-        await this.git.run(['clone', '--single-branch', '--no-tags', '--branch', branch, '--', cloneUrl, this.workspace.root], { cwd: this.workspace.jobsRoot, token, timeout: cloneTimeout });
+        await this.git.run(['clone', '--depth=1', '--single-branch', '--no-tags', '--branch', branch, '--', cloneUrl, this.workspace.root], { cwd: this.workspace.jobsRoot, token, timeout: cloneTimeout });
       } else {
         await fs.mkdir(this.workspace.root, { recursive: true });
         await this.git.run(['init', `--initial-branch=${branch}`], { cwd: this.workspace.root });

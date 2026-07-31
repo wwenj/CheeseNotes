@@ -88,7 +88,7 @@ export const phaseText: Record<SyncStatus['phase'], string> = {
   'checking-repository': '确认仓库权限',
   'checking-remote': '读取远端分支',
   'preparing-workspace': '准备本地工作区',
-  cloning: '克隆完整 Git 仓库',
+  cloning: '克隆仓库当前版本',
   'configuring-workspace': '配置本地 Git 工作区',
   'indexing-workspace': '建立文件索引',
   fetching: '读取 GitHub 版本',
