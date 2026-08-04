@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="430" height="932" viewBox="0 0 430 932" fill="none">
+  <defs>
+    <radialGradient id="top-glow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(430 28) rotate(135) scale(310 280)">
+      <stop stop-color="#FFD665" stop-opacity="0.28"/>
+      <stop offset="0.58" stop-color="#FFE9A9" stop-opacity="0.14"/>
+      <stop offset="1" stop-color="#FEFDFD" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="bottom-glow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(-12 902) rotate(-43) scale(300 260)">
+      <stop stop-color="#F8C84F" stop-opacity="0.22"/>
+      <stop offset="0.62" stop-color="#FFEAB1" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#FEFDFD" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="430" height="932" fill="#FEFDFD"/>
+  <rect width="430" height="932" fill="url(#top-glow)"/>
+  <rect width="430" height="932" fill="url(#bottom-glow)"/>
+  <circle cx="469" cy="172" r="132" stroke="#DDA41B" stroke-opacity="0.13"/>
+  <circle cx="469" cy="172" r="98" stroke="#DDA41B" stroke-opacity="0.08"/>
+  <circle cx="-34" cy="752" r="138" stroke="#DDA41B" stroke-opacity="0.11"/>
+  <circle cx="-34" cy="752" r="104" stroke="#DDA41B" stroke-opacity="0.07"/>
+  <circle cx="365" cy="244" r="4" fill="#DDA41B" fill-opacity="0.22"/>
+  <circle cx="73" cy="694" r="3" fill="#DDA41B" fill-opacity="0.18"/>
+  <circle cx="357" cy="748" r="7" stroke="#DDA41B" stroke-opacity="0.13"/>
+</svg>

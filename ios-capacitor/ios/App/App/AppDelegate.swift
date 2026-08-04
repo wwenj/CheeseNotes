@@ -35,25 +35,31 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
         let splash = UIView()
         splash.translatesAutoresizingMaskIntoConstraints = false
-        splash.backgroundColor = .white
+        splash.backgroundColor = UIColor(red: 254 / 255, green: 253 / 255, blue: 253 / 255, alpha: 1)
         splash.accessibilityViewIsModal = true
+
+        let background = UIImageView(image: UIImage(named: "CheeseLaunchBackground"))
+        background.translatesAutoresizingMaskIntoConstraints = false
+        background.contentMode = .scaleAspectFill
+        background.clipsToBounds = true
 
         let logo = UIImageView(image: UIImage(named: "CheeseLaunchSplash"))
         logo.translatesAutoresizingMaskIntoConstraints = false
         logo.contentMode = .scaleAspectFit
         logo.accessibilityLabel = "芝士"
 
-        let name = makeLabel("芝士", size: 36, weight: .heavy, color: UIColor(red: 55 / 255, green: 45 / 255, blue: 22 / 255, alpha: 1))
-        let tagline = makeLabel("芝士，就是力量", size: 17, weight: .semibold, color: UIColor(red: 115 / 255, green: 95 / 255, blue: 61 / 255, alpha: 1))
+        let name = makeLabel("芝士 就是力量", size: 32, weight: .bold, color: UIColor(red: 48 / 255, green: 42 / 255, blue: 30 / 255, alpha: 1))
+        name.adjustsFontSizeToFitWidth = true
+        name.minimumScaleFactor = 0.9
+        name.accessibilityTraits = .header
 
-        let content = UIStackView(arrangedSubviews: [logo, name, tagline])
+        let content = UIStackView(arrangedSubviews: [logo, name])
         content.translatesAutoresizingMaskIntoConstraints = false
         content.axis = .vertical
         content.alignment = .center
-        content.spacing = 12
-        content.setCustomSpacing(26, after: logo)
-        content.setCustomSpacing(14, after: name)
+        content.spacing = 24
 
+        splash.addSubview(background)
         splash.addSubview(content)
         window.addSubview(splash)
         NSLayoutConstraint.activate([
@@ -61,10 +67,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             splash.trailingAnchor.constraint(equalTo: window.trailingAnchor),
             splash.topAnchor.constraint(equalTo: window.topAnchor),
             splash.bottomAnchor.constraint(equalTo: window.bottomAnchor),
+            background.leadingAnchor.constraint(equalTo: splash.leadingAnchor),
+            background.trailingAnchor.constraint(equalTo: splash.trailingAnchor),
+            background.topAnchor.constraint(equalTo: splash.topAnchor),
+            background.bottomAnchor.constraint(equalTo: splash.bottomAnchor),
             logo.widthAnchor.constraint(equalToConstant: 178),
             logo.heightAnchor.constraint(equalToConstant: 178),
             content.centerXAnchor.constraint(equalTo: splash.centerXAnchor),
-            content.centerYAnchor.constraint(equalTo: splash.centerYAnchor, constant: -12),
+            content.centerYAnchor.constraint(equalTo: splash.centerYAnchor, constant: -8),
             content.leadingAnchor.constraint(greaterThanOrEqualTo: splash.safeAreaLayoutGuide.leadingAnchor, constant: 24),
             content.trailingAnchor.constraint(lessThanOrEqualTo: splash.safeAreaLayoutGuide.trailingAnchor, constant: -24),
         ])
