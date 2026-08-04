@@ -6,7 +6,7 @@ import RepositorySettings from './RepositorySettings';
 afterEach(() => cleanup());
 
 describe('RepositorySettings Authenticator access', () => {
-  it('shows the current device status and clears local access on exit', async () => {
+  it('clears local access from the Authenticator page', async () => {
     const onClearAuthenticatorAccess = vi.fn().mockResolvedValue(undefined);
 
     render(<RepositorySettings
@@ -23,9 +23,10 @@ describe('RepositorySettings Authenticator access', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Authenticator 验证' }));
 
     expect(screen.getByRole('heading', { name: 'Authenticator 验证' })).toBeTruthy();
-    expect(screen.getByText('已验证')).toBeTruthy();
+    expect(screen.queryByText('当前设备')).toBeNull();
+    expect(screen.queryByText('验证状态')).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: '退出验证' }));
+    fireEvent.click(screen.getByRole('button', { name: '删除当前设备验证' }));
 
     await waitFor(() => expect(onClearAuthenticatorAccess).toHaveBeenCalledTimes(1));
   });

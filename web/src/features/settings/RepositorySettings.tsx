@@ -156,10 +156,11 @@ export default function RepositorySettings({ repository, auth, readerFontSize, o
   if (page === 'authenticator') return <section className="settings-view settings-detail-view" onTouchStart={handleDetailTouchStart} onTouchEnd={handleDetailTouchEnd}>
     <SettingsPageHeader title="Authenticator 验证" onBack={goBack} onClose={onClose} />
     <main className="settings-detail-content">
-      <p className="settings-group-label">当前设备</p>
-      <section className="settings-detail-group">
-        <div className="settings-detail-row"><span>验证状态</span><strong>已验证</strong></div>
-        <button type="button" className="settings-danger-trigger" disabled={clearingAuthenticatorAccess} onClick={() => void clearAuthenticatorAccess()}>{clearingAuthenticatorAccess ? '正在退出…' : '退出验证'}</button>
+      <section className="settings-detail-group settings-authenticator-group">
+        <div className="settings-detail-heading"><span className="settings-menu-icon settings-authenticator-icon"><ShieldCheck size={20} strokeWidth={1.8} /></span><div><h2>Authenticator</h2><p>此设备已通过动态验证码验证。</p></div></div>
+        <div className="settings-authenticator-action">
+          <button type="button" className="settings-danger-trigger" disabled={clearingAuthenticatorAccess} onClick={() => void clearAuthenticatorAccess()}>{clearingAuthenticatorAccess ? '正在删除…' : '删除当前设备验证'}</button>
+        </div>
       </section>
     </main>
   </section>;
