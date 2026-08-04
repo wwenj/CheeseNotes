@@ -2,7 +2,7 @@
   <img src="ios-capacitor/ios/App/App/CheeseLaunchSplash.png" alt="CheeseNotes 芝士笔记" width="180" />
 </p>
 
-<h1 align="center">CheeseNotes</h1>
+<h1 align="center">芝士，就是力量！！</h1>
 <p align="center">CheeseNotes（芝士笔记）自部署、无广告的 Markdown 笔记与 GitHub 双向同步的 Web + IOS APP 开源项目</p>
 
 ## 项目简介
