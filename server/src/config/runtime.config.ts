@@ -6,8 +6,6 @@ type GitTransport = 'https' | 'ssh';
 type GitHubOAuthSettings = {
   clientId: string;
   clientSecret: string;
-  authorizationCallbackUrl: string;
-  homepageUrl: string;
   gitTransport?: GitTransport;
 };
 
@@ -40,14 +38,16 @@ const requiredSetting = (settings: GitHubOAuthSettings, key: keyof GitHubOAuthSe
   return value.trim();
 };
 
-const httpUrl = (value: string, key: keyof GitHubOAuthSettings, environment: string) => {
+const requiredEnvironmentUrl = (name: 'NOTEAI_WEB_ORIGIN' | 'NOTEAI_SERVICE_ORIGIN') => {
+  const value = process.env[name]?.trim();
+  if (!value) throw new Error(`缺少 ${name}；请在 config/.env.local 或部署环境中配置。`);
   let url: URL;
   try {
     url = new URL(value);
   } catch {
-    throw new Error(`GitHub OAuth ${environment} 配置中的 ${key} 必须是完整 URL。`);
+    throw new Error(`${name} 必须是完整 URL。`);
   }
-  if (!['http:', 'https:'].includes(url.protocol)) throw new Error(`GitHub OAuth ${environment} 配置中的 ${key} 必须使用 http 或 https。`);
+  if (!['http:', 'https:'].includes(url.protocol)) throw new Error(`${name} 必须使用 http 或 https。`);
   return url.href.replace(/\/$/, '');
 };
 
@@ -66,21 +66,19 @@ const githubOAuthSettings = (): GitHubOAuthSettings => {
 
   const settings = file[environment];
   if (!settings) throw new Error(`GitHub OAuth 本地配置缺少 ${environment} 环境。`);
-  const authorizationCallbackUrl = httpUrl(requiredSetting(settings, 'authorizationCallbackUrl', environment), 'authorizationCallbackUrl', environment);
-  const homepageUrl = httpUrl(requiredSetting(settings, 'homepageUrl', environment), 'homepageUrl', environment);
   return {
     clientId: requiredSetting(settings, 'clientId', environment),
     clientSecret: requiredSetting(settings, 'clientSecret', environment),
-    authorizationCallbackUrl,
-    homepageUrl,
     gitTransport: gitTransport(settings, environment),
   };
 };
 
 export const runtimeConfig = (): RuntimeConfig => {
   const oauth = githubOAuthSettings();
+  const webOrigin = requiredEnvironmentUrl('NOTEAI_WEB_ORIGIN');
+  const serviceOrigin = requiredEnvironmentUrl('NOTEAI_SERVICE_ORIGIN');
   const corsOriginSetting = process.env.CORS_ORIGINS ?? 'capacitor://localhost';
-  const corsOrigins = [...new Set([new URL(oauth.homepageUrl).origin, ...corsOriginSetting.split(',').map((value) => value.trim()).filter(Boolean)])];
+  const corsOrigins = [...new Set([new URL(webOrigin).origin, ...corsOriginSetting.split(',').map((value) => value.trim()).filter(Boolean)])];
   return {
     dataRoot: process.env.NOTEAI_DATA_ROOT
       ? resolve(process.env.NOTEAI_DATA_ROOT)
@@ -89,10 +87,10 @@ export const runtimeConfig = (): RuntimeConfig => {
     serviceDir: 'note-service',
     port: Number(process.env.PORT || 3000),
     host: process.env.HOST || '0.0.0.0',
-    webOrigin: oauth.homepageUrl,
+    webOrigin,
     githubOAuthClientId: oauth.clientId,
     githubOAuthClientSecret: oauth.clientSecret,
-    githubOAuthCallbackUrl: oauth.authorizationCallbackUrl,
+    githubOAuthCallbackUrl: `${serviceOrigin}/api/auth/github/callback`,
     corsOrigins,
   };
 };

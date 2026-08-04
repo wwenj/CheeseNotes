@@ -20,4 +20,4 @@ RUN apt-get update \
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/public ./public
-CMD ["node", "dist/src/main.js"]
+CMD ["node", "--env-file-if-exists=config/.env.local", "dist/src/main.js"]

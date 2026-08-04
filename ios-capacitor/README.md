@@ -25,7 +25,7 @@ pnpm ios:assets
 
 ## 本地启动
 
-先启动后端。Capacitor 内置 WebView 的 `capacitor://localhost` 已是服务端默认允许的 CORS origin。GitHub OAuth 的本地与生产 callback、homepage 均从 `server/config/github-oauth.local.json` 读取：
+先启动后端。Capacitor 内置 WebView 的 `capacitor://localhost` 已是服务端默认允许的 CORS origin。GitHub OAuth 凭据从 `server/config/github-oauth.local.json` 读取；Web、服务端和 iOS 的地址均从仓库根目录 `config/.env.local` 读取：
 
 ```bash
 cd /Users/zu/Desktop/Code/previte/NoteAI/server
@@ -56,7 +56,7 @@ pnpm ios:sync:production
 pnpm ios:open
 ```
 
-`ios:sync:production` 会将 `https://note.wwenj.com` 写入独立打包副本。线上 API 必须允许 `capacitor://localhost` 的 CORS；当前已验证预检通过。
+`ios:sync:production` 会将 `NOTEAI_SERVICE_ORIGIN` 写入独立打包副本。线上 API 必须允许 `capacitor://localhost` 的 CORS。
 
 ## Personal Team 签名
 
@@ -65,7 +65,7 @@ pnpm ios:open
 ## 命令
 
 - `pnpm ios:prepare`：构建 Web，复制到独立 `www/`，并注入 Simulator API 地址。
-- `pnpm ios:prepare:production`：构建 Web 并注入 `https://note.wwenj.com`。
+- `pnpm ios:prepare:production`：构建 Web 并注入 `config/.env.local` 中的 `NOTEAI_SERVICE_ORIGIN`。
 - `pnpm ios:sync`：执行 prepare 后同步 Web 包和 iOS 原生依赖。
 - `pnpm ios:sync:production`：同步使用生产 API 的 iOS 包，供真机测试。
 - `pnpm ios:assets`：从 `assets/icon-only.png` 生成 iOS AppIcon。

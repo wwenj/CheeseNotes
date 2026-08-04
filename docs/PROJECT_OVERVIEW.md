@@ -190,7 +190,7 @@ iOS 不是另一套业务实现，而是通过 Capacitor 打包同一个 Web 应
 
 ### 6.2 GitHub 凭据与数据边界
 
-GitHub OAuth 的 Client ID、Client Secret、callback、homepage 和 Git transport 配置只从 `server/config/github-oauth.local.json` 读取；Authenticator Secret 同样是服务端本地文件。这两个本地配置均被 Git 忽略，仓库只保留 example 文件。
+GitHub OAuth 的 Client ID、Client Secret 和 Git transport 配置只从 `server/config/github-oauth.local.json` 读取；Web origin 与服务 origin 从 `config/.env.local` 读取，并据此生成 OAuth callback。Authenticator Secret 同样是服务端本地文件。这些本地配置均被 Git 忽略，仓库只保留 example 文件。
 
 OAuth 成功得到的 GitHub Access Token 仅保存在服务端 SQLite settings 中，不会返回浏览器或 iOS 页面。Git 子进程通过临时 `GIT_ASKPASS` 环境读取 token，remote URL、Git config、命令参数和日志都不包含 token。断开 GitHub 时，服务端会清空 token、仓库设置、working tree 和同步记录；客户端也会删除相应的阅读缓存。
 
@@ -283,6 +283,7 @@ pnpm dev
 ```text
 server/config/github-oauth.local.json
 server/config/authenticator-secret.local.txt
+config/.env.local
 ```
 
 可以从对应的 `.example` 文件复制；不要把真实 Client Secret、Authenticator Secret 或运行时 SQLite 数据提交到仓库。

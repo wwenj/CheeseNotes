@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { loadNoteAiLocalEnv } from '../../config/local-env.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const appRoot = resolve(scriptDir, '..');
@@ -11,7 +12,8 @@ const webRoot = resolve(repositoryRoot, 'web');
 const sourceDir = resolve(repositoryRoot, 'server/public');
 const outputDir = resolve(appRoot, 'www');
 const defaultEndpoint = 'http://127.0.0.1:3000';
-const endpoint = normalizeEndpoint(process.env.NOTEAI_SERVICE_URL ?? defaultEndpoint);
+loadNoteAiLocalEnv();
+const endpoint = normalizeEndpoint(process.env.NOTEAI_SERVICE_URL ?? process.env.NOTEAI_SERVICE_ORIGIN ?? defaultEndpoint);
 
 function normalizeEndpoint(value) {
   const url = new URL(value);

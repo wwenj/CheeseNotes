@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="ios-capacitor/assets/icon-only.png" alt="NoteAI logo" width="180" />
+  <img src="ios-capacitor/ios/App/App/CheeseLaunchSplash.png" alt="芝士，就是力量！" width="180" />
 </p>
 
 <h1 align="center">芝士，就是力量！</h1>
@@ -15,6 +15,7 @@ NoteAI 是一套以 iOS 使用体验为中心的个人笔记系统。它把 Mark
 
 - **为 iOS 而生的笔记体验**：通过 Capacitor 打包为原生 iOS App，适配原生键盘、相机选图和安全存储；阅读、编辑、插图与文件管理集中在一个轻量工作台中。
 - **快速打开，专注写作**：App 内置页面资源，并缓存最近访问的文章和资源，减少重复请求与等待；Markdown 编辑保留源码可见性，同时提供实时的阅读反馈。
+- **Authenticator 验证，简单而安全**：首次输入 6 位 Authenticator 验证码即可在当前设备完成验证，设备凭据使用安全存储保存；服务端对受保护接口校验设备令牌，未验证设备不能读取或修改笔记。
 - **Markdown 是唯一内容格式**：笔记直接以 `.md` 保存，支持常见 Markdown、GFM、内部链接与图片引用。不锁定私有文档格式，随时可以用 Git、GitHub 或其他 Markdown 工具继续使用。
 - **GitHub 双向同步**：首次连接仓库后，服务端创建真实 Git working tree；本地保存、远端更新、提交、合并与推送都通过标准 Git 流程完成。
 - **同步结果可验证**：服务端在 push 后再次读取远端 ref；只有远端提交确实与预期一致，才会显示“已同步”。发生并发修改时保留冲突信息和处理入口，不把未确认状态伪装成成功。
@@ -37,7 +38,7 @@ NoteAI 服务端（NestJS + Fastify）
 
 ## 运行方式
 
-服务端需要 Node.js 与 pnpm。GitHub OAuth 配置放在 `server/config/github-oauth.local.json`，可从示例配置复制后填写；该文件被 Git 忽略，客户端不会接触 Client Secret。
+服务端需要 Node.js 与 pnpm。GitHub OAuth 凭据放在 `server/config/github-oauth.local.json`，服务端与 iOS 的地址配置放在 `config/.env.local`；两者均被 Git 忽略。分别从相邻的 `.example` 文件复制后填写，客户端不会接触 Client Secret。
 
 ```bash
 cd server
@@ -60,5 +61,3 @@ pnpm ios:sync
 ```
 
 `pnpm ios:sync:production` 会将生产服务地址写入独立的 iOS 打包副本，随后可在 Xcode 中打开 `ios/App/App.xcworkspace` 运行。
-
-更多服务端模块与接口约定见 [server/ARCHITECTURE.md](server/ARCHITECTURE.md)，完整产品设计见 [docs/PROJECT_OVERVIEW.md](docs/PROJECT_OVERVIEW.md)。

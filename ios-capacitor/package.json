@@ -7,9 +7,9 @@
   "scripts": {
     "ios:add": "cap add ios --packagemanager CocoaPods",
     "ios:prepare": "node scripts/prepare-web.mjs",
-    "ios:prepare:production": "NOTEAI_SERVICE_URL=https://note.wwenj.com pnpm ios:prepare",
+    "ios:prepare:production": "pnpm ios:prepare",
     "ios:sync": "pnpm ios:prepare && cap sync ios",
-    "ios:sync:production": "NOTEAI_SERVICE_URL=https://note.wwenj.com pnpm ios:sync",
+    "ios:sync:production": "pnpm ios:sync",
     "ios:assets": "capacitor-assets generate --ios",
     "ios:open": "cap open ios",
     "ios:build:simulator": "pnpm ios:sync && xcodebuild -workspace ios/App/App.xcworkspace -scheme App -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -configuration Debug CODE_SIGNING_ALLOWED=NO build"
