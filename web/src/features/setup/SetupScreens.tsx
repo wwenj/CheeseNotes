@@ -125,7 +125,7 @@ export function InitializationProgress({ sync, onRetry }: { sync: SyncStatus; on
     'preparing-workspace': '正在清理并准备本地 Git 工作区',
     cloning: '正在克隆默认分支的当前版本',
     'configuring-workspace': '正在配置本地 Git 用户和远端地址',
-    'indexing-workspace': '正在扫描仓库文件并建立 NoteAI 索引',
+    'indexing-workspace': '正在扫描仓库文件并建立 CheeseNotes 索引',
     fetching: '正在读取 GitHub 最新版本',
     merging: '正在合并本地与远端修改',
     committing: '正在提交本地修改',

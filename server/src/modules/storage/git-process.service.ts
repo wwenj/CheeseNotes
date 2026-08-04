@@ -23,7 +23,7 @@ export class GitProcessService implements OnModuleInit, OnModuleDestroy {
     try {
       await this.run(['--version'], { cwd: this.jobsRoot, timeout: 10_000 });
     } catch (reason) {
-      throw new Error(`NoteAI 启动失败：系统 Git 不可用。${reason instanceof Error ? ` ${reason.message}` : ''}`);
+      throw new Error(`CheeseNotes 启动失败：系统 Git 不可用。${reason instanceof Error ? ` ${reason.message}` : ''}`);
     }
   }
 

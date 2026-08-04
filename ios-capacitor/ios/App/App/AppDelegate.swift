@@ -46,9 +46,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         let logo = UIImageView(image: UIImage(named: "CheeseLaunchSplash"))
         logo.translatesAutoresizingMaskIntoConstraints = false
         logo.contentMode = .scaleAspectFit
-        logo.accessibilityLabel = "芝士"
+        logo.accessibilityLabel = "芝士笔记"
 
-        let name = makeLabel("芝士 就是力量", size: 32, weight: .bold, color: UIColor(red: 74 / 255, green: 53 / 255, blue: 20 / 255, alpha: 1))
+        let name = makeLabel("芝士笔记", size: 32, weight: .bold, color: UIColor(red: 74 / 255, green: 53 / 255, blue: 20 / 255, alpha: 1))
         name.adjustsFontSizeToFitWidth = true
         name.minimumScaleFactor = 0.9
         name.accessibilityTraits = .header

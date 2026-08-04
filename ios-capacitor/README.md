@@ -1,4 +1,4 @@
-# NoteAI Capacitor iOS Simulator
+# CheeseNotes Capacitor iOS Simulator
 
 这是独立的 Capacitor iOS 工程：它打包 `web/` 的构建产物，但不修改 `web/` 源码、依赖或 Vite 配置，也不使用根目录已有的 `ios/` SwiftUI 工程。
 

@@ -1,8 +1,8 @@
-# NoteAI / 芝士
+# CheeseNotes / 芝士笔记
 
 > 一个以 Markdown 为唯一内容格式、以 GitHub 仓库为可验证远端副本的个人笔记系统。
 
-NoteAI 面向希望长期拥有、组织和使用自己笔记的人。它不是把 Markdown 上传到某个不可见的 SaaS 数据库，而是将笔记放入用户有写入权限的 GitHub 仓库；同时提供一套比直接编辑仓库文件更适合日常写作、阅读和移动使用的应用体验。
+CheeseNotes 面向希望长期拥有、组织和使用自己笔记的人。它不是把 Markdown 上传到某个不可见的 SaaS 数据库，而是将笔记放入用户有写入权限的 GitHub 仓库；同时提供一套比直接编辑仓库文件更适合日常写作、阅读和移动使用的应用体验。
 
 产品由 Web 客户端、NestJS 服务端和 Capacitor iOS 壳组成。服务端持有一个真实 Git working tree，负责安全写入、GitHub 授权、标准 Git 同步与冲突处理；SQLite 只保存索引和协调元数据。Web 和 iOS 都通过同一套 API 使用它。
 
@@ -10,7 +10,7 @@ NoteAI 面向希望长期拥有、组织和使用自己笔记的人。它不是�
 
 ### 1.1 解决的问题
 
-纯 Markdown 的优点是开放、可迁移、适合 Git 管理，但日常体验往往需要在文件管理器、编辑器、Git 客户端和移动端之间切换。NoteAI 将这些能力收敛为一个工作台：
+纯 Markdown 的优点是开放、可迁移、适合 Git 管理，但日常体验往往需要在文件管理器、编辑器、Git 客户端和移动端之间切换。CheeseNotes 将这些能力收敛为一个工作台：
 
 - 用文件树和全文标题搜索管理笔记库；
 - 用阅读视图和所见即所得的写作视图写 Markdown；
@@ -21,7 +21,7 @@ NoteAI 面向希望长期拥有、组织和使用自己笔记的人。它不是�
 ### 1.2 设计原则
 
 1. **Markdown 优先**：可写入内容仅限 `.md`，标题、正文、内部链接和图片引用都保留在标准文件中。
-2. **GitHub 是可携带的远端副本**：用户可以直接用 GitHub、git 或其他 Markdown 工具访问仓库；NoteAI 不锁定数据格式。
+2. **GitHub 是可携带的远端副本**：用户可以直接用 GitHub、git 或其他 Markdown 工具访问仓库；CheeseNotes 不锁定数据格式。
 3. **服务端 Git 工作副本优先于浏览器直写**：每次编辑先原子写入真实 working tree，再由同步协调器串行提交和推送，避免浏览器端承担 Git 并发和令牌安全问题。
 4. **同步状态必须可证明**：`verified` 的含义不是“请求已发出”，而是本地 HEAD、generation 和 GitHub 远端 ref 已验证一致。
 5. **阅读与写作是一件事的两个视图**：读模式服务于沉浸和跳转，写模式服务于自然编辑；两者使用同一 Markdown 内容，而非两套文档模型。
@@ -36,7 +36,7 @@ NoteAI 面向希望长期拥有、组织和使用自己笔记的人。它不是�
 └──────────────┬───────────────┘
                │ X-Device-Token + /api
 ┌──────────────▼───────────────┐
-│ NoteAI Server                │
+│ CheeseNotes Server            │
 │ NestJS + Fastify             │
 │                              │
 │ Git working tree：全部文件    │
@@ -200,7 +200,7 @@ OAuth 成功得到的 GitHub Access Token 仅保存在服务端 SQLite settings 
 
 ### 7.1 为什么使用真实 Git working tree
 
-手工调用 GitHub Contents/Git Data API 等于重新实现一部分 Git：多文件事务、二进制 blob、rename、三方冲突、push 竞争、崩溃恢复都要自行拼装。NoteAI 直接使用系统 Git，让 `repository/` 成为唯一内容副本：
+手工调用 GitHub Contents/Git Data API 等于重新实现一部分 Git：多文件事务、二进制 blob、rename、三方冲突、push 竞争、崩溃恢复都要自行拼装。CheeseNotes 直接使用系统 Git，让 `repository/` 成为唯一内容副本：
 
 - `file_index`：稳定 ID、路径、字节 revision、标题、类型和时间，可随时从 working tree 重建；
 - `repository_state`：仓库、固定分支、local/remote HEAD、generation、锁和同步状态；

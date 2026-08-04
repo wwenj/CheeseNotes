@@ -36,7 +36,7 @@ function WelcomeView({ files, recentArticles, sync, onOpen, onNew }: Pick<Docume
       <header className="welcome-summary">
         <div className="welcome-intro">
           <div className="welcome-brand"><img src="/images/cheese-logo.png" alt="" /></div>
-          <h1 id="welcome-title">芝士，就是力量</h1>
+          <h1 id="welcome-title">CheeseNotes · 芝士笔记</h1>
           <button type="button" className="accent-button" onClick={onNew}><FilePlus2 size={16} />新建笔记</button>
         </div>
         <dl className="welcome-stats">

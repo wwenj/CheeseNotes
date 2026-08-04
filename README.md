@@ -1,13 +1,13 @@
 <p align="center">
-  <img src="ios-capacitor/ios/App/App/CheeseLaunchSplash.png" alt="芝士，就是力量！" width="180" />
+  <img src="ios-capacitor/ios/App/App/CheeseLaunchSplash.png" alt="CheeseNotes 芝士笔记" width="180" />
 </p>
 
-<h1 align="center">芝士，就是力量！</h1>
-<p align="center">自部署、无广告的 Markdown 笔记与 GitHub 同步服务</p>
+<h1 align="center">CheeseNotes</h1>
+<p align="center">CheeseNotes（芝士笔记）自部署、无广告的 Markdown 笔记与 GitHub 双向同步的 Web + IOS APP 开源项目</p>
 
 ## 项目简介
 
-NoteAI 是一套以 iOS 使用体验为中心的个人笔记系统。它把 Markdown 文件保留在用户自己的 GitHub 仓库中，以自部署服务负责可靠读写和双向同步，让手机上的记录、阅读与整理不再受传统自部署笔记系统的网络延迟、文件分散和同步状态不透明所限制。
+CheeseNotes（芝士笔记）是一套以 iOS 使用体验为中心的个人笔记系统。它把 Markdown 文件保留在用户自己的 GitHub 仓库中，以自部署服务负责可靠读写和双向同步，让手机上的记录、阅读与整理不再受传统自部署笔记系统的网络延迟、文件分散和同步状态不透明所限制。
 
 项目不内置广告，也不把笔记正文交给第三方 SaaS。Markdown 与附件始终是可直接访问、可迁移的文件；GitHub 仓库是可验证的远端副本。
 
@@ -27,7 +27,7 @@ NoteAI 是一套以 iOS 使用体验为中心的个人笔记系统。它把 Mark
 
 <table>
   <tr>
-    <td width="50%" align="center"><img src="assets/screenshots/02-launch-screen.jpg" alt="芝士启动页" width="88%" /><br /><sub>启动页</sub></td>
+    <td width="50%" align="center"><img src="assets/screenshots/02-launch-screen.jpg" alt="CheeseNotes 启动页" width="88%" /><br /><sub>启动页</sub></td>
     <td width="50%" align="center"><img src="assets/screenshots/03-library-sync.jpg" alt="知识库目录与 GitHub 同步状态" width="88%" /><br /><sub>知识库目录与同步状态</sub></td>
   </tr>
   <tr>
@@ -46,7 +46,7 @@ NoteAI 是一套以 iOS 使用体验为中心的个人笔记系统。它把 Mark
 iOS App
   │  阅读、编辑、图片与文件管理
   ▼
-NoteAI 服务端（NestJS + Fastify）
+CheeseNotes 服务端（NestJS + Fastify）
   │  SQLite：状态、索引、同步任务与凭据
   ▼
 持久卷中的 Git working tree
@@ -68,7 +68,7 @@ npm run start:dev
 生产镜像可在仓库根目录构建。运行时请将持久卷挂载到 `/var/lib/note-service`，其中包含 SQLite 元数据、真实 Git 工作树及同步任务的恢复文件。
 
 ```bash
-docker build -f server/Dockerfile -t noteai .
+docker build -f server/Dockerfile -t cheesenotes .
 ```
 
 ## iOS 开发

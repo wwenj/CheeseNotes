@@ -130,14 +130,14 @@ export class RepositoryWorkspaceService {
       const entries = await fs.readdir(directory, { withFileTypes: true });
       for (const entry of entries) {
         const relativePath = `${prefix}/${entry.name}`;
-        if (entry.isSymbolicLink()) throw new BadRequestException('文件夹包含符号链接，NoteAI 不允许移动或删除');
+        if (entry.isSymbolicLink()) throw new BadRequestException('文件夹包含符号链接，CheeseNotes 不允许移动或删除');
         if (entry.isDirectory()) {
-          if (existsSync(join(directory, entry.name, '.git'))) throw new BadRequestException('文件夹包含子模块，NoteAI 不允许移动或删除');
+          if (existsSync(join(directory, entry.name, '.git'))) throw new BadRequestException('文件夹包含子模块，CheeseNotes 不允许移动或删除');
           await visit(join(directory, entry.name), relativePath);
         } else if (!entry.isFile() || (entry.name !== '.gitkeep' && !this.paths.allowed(relativePath))) {
-          throw new BadRequestException(`文件夹包含不受 NoteAI 管理的文件「${relativePath}」，已拒绝修改`);
+          throw new BadRequestException(`文件夹包含不受 CheeseNotes 管理的文件「${relativePath}」，已拒绝修改`);
         } else if (entry.name !== '.gitkeep' && await this.isLfsPointer(join(directory, entry.name))) {
-          throw new BadRequestException(`文件夹包含 Git LFS 文件「${relativePath}」，NoteAI 不允许移动或删除`);
+          throw new BadRequestException(`文件夹包含 Git LFS 文件「${relativePath}」，CheeseNotes 不允许移动或删除`);
         }
       }
     };
@@ -239,7 +239,7 @@ export class RepositoryWorkspaceService {
     if (unsupported.length) {
       throw new UnprocessableEntityException({
         code: 'UNSUPPORTED_LOCAL_CHANGES',
-        message: `检测到 NoteAI 不支持的本地改动，已拒绝同步：${unsupported.slice(0, 5).join('、')}`,
+        message: `检测到 CheeseNotes 不支持的本地改动，已拒绝同步：${unsupported.slice(0, 5).join('、')}`,
       });
     }
     return entries;
