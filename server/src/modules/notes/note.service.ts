@@ -16,6 +16,51 @@ import { SyncService, type TreeOperation } from '../sync/sync.service.js';
 type TreeEntry = { id: string; path: string; revision: string; assetVersion: string; updated_at: string; title: string };
 type NoteTree = { files: TreeEntry[]; folders: string[] };
 
+const uploadImageExtensions = new Set(['.png', '.apng', '.jpg', '.jpeg', '.jfif', '.webp', '.gif', '.svg', '.avif', '.bmp', '.ico', '.heic', '.heif']);
+
+function imageKind(data: Buffer) {
+  if (data.length >= 8 && data.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'png';
+  if (data.length >= 3 && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff) return 'jpeg';
+  if (data.subarray(0, 6).toString('ascii') === 'GIF87a' || data.subarray(0, 6).toString('ascii') === 'GIF89a') return 'gif';
+  if (data.length >= 12 && data.subarray(0, 4).toString('ascii') === 'RIFF' && data.subarray(8, 12).toString('ascii') === 'WEBP') return 'webp';
+  if (data.length >= 2 && data.subarray(0, 2).toString('ascii') === 'BM') return 'bmp';
+  if (data.length >= 4 && data[0] === 0 && data[1] === 0 && data[2] === 1 && data[3] === 0) return 'ico';
+  const brand = data.length >= 12 && data.subarray(4, 8).toString('ascii') === 'ftyp' ? data.subarray(8, 12).toString('ascii') : '';
+  if (['avif', 'avis'].includes(brand)) return 'avif';
+  if (['heic', 'heix', 'hevc', 'hevx', 'heim', 'heis', 'mif1', 'msf1'].includes(brand)) return 'heif';
+  const text = data.subarray(0, Math.min(data.length, 4096)).toString('utf8').replace(/^\uFEFF?\s*/, '');
+  if (/^(?:<\?xml[^>]*>\s*)?<svg(?:\s|>)/i.test(text)) return 'svg';
+  return null;
+}
+
+function extensionMatchesImageKind(extension: string, kind: string) {
+  if (kind === 'png') return extension === '.png' || extension === '.apng';
+  if (kind === 'jpeg') return ['.jpg', '.jpeg', '.jfif'].includes(extension);
+  if (kind === 'heif') return extension === '.heic' || extension === '.heif';
+  return extension === `.${kind}`;
+}
+
+function mimeMatchesImageKind(mime: string, kind: string) {
+  const value = mime.toLowerCase().split(';')[0].trim();
+  const allowed: Record<string, string[]> = {
+    png: ['image/png', 'image/apng'], jpeg: ['image/jpeg', 'image/jpg', 'image/pjpeg'], gif: ['image/gif'], webp: ['image/webp'], svg: ['image/svg+xml'], avif: ['image/avif'], bmp: ['image/bmp', 'image/x-ms-bmp'], ico: ['image/x-icon', 'image/vnd.microsoft.icon'], heif: ['image/heic', 'image/heif', 'image/heic-sequence', 'image/heif-sequence'],
+  };
+  return allowed[kind]?.includes(value) ?? false;
+}
+
+function safeUploadName(filename: string) {
+  const original = basename(filename).normalize('NFC');
+  const extension = extname(original).toLowerCase();
+  const stem = original.slice(0, original.length - extension.length)
+    .replace(/[\\/:*?"<>|#%()`\u0000-\u001f\u007f]/g, '-')
+    .replace(/[\[\]]/g, '-')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^[.\-]+|[.\-]+$/g, '')
+    .slice(0, 100);
+  return { extension, name: `${stem || 'image'}${extension}` };
+}
+
 function parentFolders(path: string, includePath = false) {
   const parts = path.split('/').filter(Boolean);
   const limit = includePath ? parts.length : parts.length - 1;
@@ -144,6 +189,34 @@ export class NoteService {
     const file = this.workspace.file(safe);
     await fs.access(file).catch(() => { throw new NotFoundException('文件不存在'); });
     return { file, mime: mimeTypes[extname(safe).toLowerCase()] ?? 'application/octet-stream', version: row.revision };
+  }
+
+  async uploadImage(sourcePath: string, image: { data: Buffer; filename: string; mimetype: string }) {
+    return this.sync.write(async () => {
+      const source = this.paths.safe(sourcePath, true);
+      const { extension, name } = safeUploadName(image.filename);
+      if (!uploadImageExtensions.has(extension)) throw new BadRequestException('不支持该图片格式');
+      const kind = imageKind(image.data);
+      if (!kind || !extensionMatchesImageKind(extension, kind) || !mimeMatchesImageKind(image.mimetype, kind)) throw new BadRequestException('图片内容、扩展名或 MIME 类型不匹配');
+
+      const sourceFolder = dirname(source);
+      const assetFolder = sourceFolder === '.' ? 'assets' : `${sourceFolder}/assets`;
+      const stem = name.slice(0, name.length - extension.length);
+      let target = this.paths.safe(`${assetFolder}/${name}`);
+      let suffix = 2;
+      while (this.workspace.indexByPath(target) || await this.workspace.pathExists(target)) {
+        target = this.paths.safe(`${assetFolder}/${stem}-${suffix}${extension}`);
+        suffix += 1;
+      }
+
+      await this.workspace.writeAtomic(target, image.data);
+      const revision = hash(image.data);
+      const updatedAt = now();
+      const result = { id: randomUUID(), path: target, revision, assetVersion: revision, updated_at: updatedAt, title: basename(target) };
+      this.database.db.prepare('INSERT INTO file_index(id,path,revision,title,kind,updated_at) VALUES(?,?,?,?,?,?)').run(result.id, result.path, result.revision, result.title, extension.slice(1), updatedAt);
+      await this.sync.markDirty();
+      return result;
+    });
   }
 
   async save(path: string, content: string, revision?: string, id?: string) {

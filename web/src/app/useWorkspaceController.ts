@@ -409,6 +409,26 @@ export function useWorkspaceController(enabled = true) {
     }
   }, [reload, revealFolder]);
 
+  const uploadImage = useCallback(async (file: File, sourcePath: string) => {
+    setError(null);
+    try {
+      const uploaded = await notesApi.uploadImage(file, sourcePath);
+      setFiles((current) => {
+        const next = current.filter((item) => item.id !== uploaded.id && item.path !== uploaded.path);
+        return [...next, uploaded].sort((left, right) => left.path.localeCompare(right.path, 'zh-CN'));
+      });
+      setFolders((current) => {
+        const parts = uploaded.path.split('/').slice(0, -1);
+        const parents = parts.map((_, index) => parts.slice(0, index + 1).join('/'));
+        return [...new Set([...current, ...parents])].sort((left, right) => left.localeCompare(right, 'zh-CN'));
+      });
+      return uploaded;
+    } catch (reason) {
+      setError(`图片上传失败：${messageOf(reason)}`);
+      return null;
+    }
+  }, []);
+
   const resetEditor = useCallback(() => {
     const current = selectedRef.current;
     const currentRepository = repositoryRef.current;
@@ -659,6 +679,7 @@ export function useWorkspaceController(enabled = true) {
     flushCurrentDraft,
     createNote,
     createFolder,
+    uploadImage,
     applyTreeChanges,
     moveCurrentFile,
     deleteCurrentFile,

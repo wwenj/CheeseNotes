@@ -25,6 +25,12 @@ export const notesApi = {
   search: (q: string) => request<NoteSummary[]>(`search?q=${encodeURIComponent(q)}`),
   create: (path: string, content: string, id?: string) => request<SaveResult>('notes', { method: 'POST', body: JSON.stringify({ path, content, ...(id ? { id } : {}) }) }),
   createFolder: (path: string) => request<FolderResult>('folders', { method: 'POST', body: JSON.stringify({ path }) }),
+  uploadImage: (file: File, sourcePath: string) => {
+    const body = new FormData();
+    body.append('sourcePath', sourcePath);
+    body.append('file', file, file.name);
+    return request<NoteSummary>('files/images', { method: 'POST', body });
+  },
   update: (path: string, content: string, revision: string, id?: string) => request<SaveResult>('notes', { method: 'PUT', body: JSON.stringify({ path, content, revision, ...(id ? { id } : {}) }) }),
   remove: (path: string, revision: string, id?: string) => request<{ sync: unknown }>('notes', { method: 'DELETE', body: JSON.stringify({ path, revision, ...(id ? { id } : {}) }) }),
   fileUrl: (path: string, version?: string) => {

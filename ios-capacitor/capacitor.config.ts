@@ -7,6 +7,11 @@ const config: CapacitorConfig = {
   server: {
     iosScheme: 'capacitor',
   },
+  plugins: {
+    Keyboard: {
+      autoBackdropColor: 'dom',
+    },
+  },
 };
 
 export default config;

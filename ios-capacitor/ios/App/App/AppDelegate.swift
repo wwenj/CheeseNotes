@@ -35,7 +35,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
         let splash = UIView()
         splash.translatesAutoresizingMaskIntoConstraints = false
-        splash.backgroundColor = UIColor(red: 254 / 255, green: 253 / 255, blue: 253 / 255, alpha: 1)
+        splash.backgroundColor = UIColor(red: 1, green: 248 / 255, blue: 226 / 255, alpha: 1)
         splash.accessibilityViewIsModal = true
 
         let background = UIImageView(image: UIImage(named: "CheeseLaunchBackground"))
@@ -48,7 +48,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         logo.contentMode = .scaleAspectFit
         logo.accessibilityLabel = "芝士"
 
-        let name = makeLabel("芝士 就是力量", size: 32, weight: .bold, color: UIColor(red: 48 / 255, green: 42 / 255, blue: 30 / 255, alpha: 1))
+        let name = makeLabel("芝士 就是力量", size: 32, weight: .bold, color: UIColor(red: 74 / 255, green: 53 / 255, blue: 20 / 255, alpha: 1))
         name.adjustsFontSizeToFitWidth = true
         name.minimumScaleFactor = 0.9
         name.accessibilityTraits = .header

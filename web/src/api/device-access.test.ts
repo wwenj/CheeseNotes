@@ -29,6 +29,19 @@ beforeEach(() => {
 });
 
 describe('device access storage', () => {
+  it('keeps the browser-generated multipart boundary for FormData requests', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _options?: RequestInit) => new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { fetchWithAuthorization } = await import('./http');
+    const body = new FormData();
+    body.append('sourcePath', '文章.md');
+
+    await fetchWithAuthorization('https://example.com/api/files/images', { method: 'POST', body });
+
+    const options = fetchMock.mock.calls[0][1]!;
+    expect(new Headers(options.headers).has('Content-Type')).toBe(false);
+  });
+
   it('reads the decoded iOS Keychain value after an app restart', async () => {
     platform.native = true;
     secureStorage.get.mockResolvedValue('trusted-device-token');

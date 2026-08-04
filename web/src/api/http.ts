@@ -24,7 +24,7 @@ export function apiUrl(path: string) {
 
 export async function fetchWithAuthorization(url: string, options: RequestInit = {}): Promise<AuthorizedFetchResult> {
   const headers = new Headers(options.headers);
-  if (options.body) headers.set('Content-Type', 'application/json');
+  if (options.body && !(options.body instanceof FormData)) headers.set('Content-Type', 'application/json');
   const trustedDeviceToken = await deviceToken();
   if (trustedDeviceToken) headers.set('X-Device-Token', trustedDeviceToken);
   try {

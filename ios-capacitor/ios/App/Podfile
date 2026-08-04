@@ -13,6 +13,8 @@ def capacitor_pods
   pod 'CapacitorCordova', :path => '../../node_modules/.pnpm/@capacitor+ios@8.4.1_@capacitor+core@8.4.1/node_modules/@capacitor/ios'
   pod 'AparajitaCapacitorSecureStorage', :path => '../../node_modules/.pnpm/@aparajita+capacitor-secure-storage@8.0.0/node_modules/@aparajita/capacitor-secure-storage'
   pod 'CapacitorBrowser', :path => '../../node_modules/.pnpm/@capacitor+browser@8.0.4_@capacitor+core@8.4.1/node_modules/@capacitor/browser'
+  pod 'CapacitorCamera', :path => '../../node_modules/.pnpm/@capacitor+camera@8.2.2_@capacitor+core@8.4.1/node_modules/@capacitor/camera'
+  pod 'CapacitorKeyboard', :path => '../../node_modules/.pnpm/@capacitor+keyboard@8.0.5_@capacitor+core@8.4.1/node_modules/@capacitor/keyboard'
 end
 
 target 'App' do

@@ -268,7 +268,7 @@ export default function App() {
     : null;
   const vaultContent = editingArticle
     ? workspace.articleMode === 'write'
-      ? <Suspense fallback={<div className="document-loading" role="status"><LoaderCircle className="spin" size={20} /></div>}><ArticleEditor key={editingArticle.selected.path} draft={editingArticle.draft} readerFontSize={workspace.clientSettings.readerFontSize} sourcePath={editingArticle.selected.path} files={workspace.files} onChange={workspace.updateDraftContent} onSave={() => { void workspace.flushCurrentDraft(); }} /></Suspense>
+      ? <Suspense fallback={<div className="document-loading" role="status"><LoaderCircle className="spin" size={20} /></div>}><ArticleEditor key={editingArticle.selected.path} draft={editingArticle.draft} readerFontSize={workspace.clientSettings.readerFontSize} sourcePath={editingArticle.selected.path} files={workspace.files} onChange={workspace.updateDraftContent} onSave={() => { void workspace.flushCurrentDraft(); }} onUploadImage={workspace.uploadImage} onError={workspace.setError} /></Suspense>
       : <DocumentView selected={editingArticle.selected} note={{ ...editingArticle.note, content: editingArticle.draft.content }} files={workspace.files} recentArticles={workspace.recentArticles} sync={workspace.sync} loading={workspace.loading || workspace.loadingFile} readerFontSize={workspace.clientSettings.readerFontSize} onOpen={openDocumentPath} onNew={openNew} />
     : <DocumentView selected={workspace.selected} note={workspace.note} files={workspace.files} recentArticles={workspace.recentArticles} sync={workspace.sync} loading={workspace.loading || workspace.loadingFile} readerFontSize={workspace.clientSettings.readerFontSize} onOpen={openDocumentPath} onNew={openNew} />;
 

@@ -14,12 +14,18 @@ importers:
       '@capacitor/browser':
         specifier: 8.0.4
         version: 8.0.4(@capacitor/core@8.4.1)
+      '@capacitor/camera':
+        specifier: 8.2.2
+        version: 8.2.2(@capacitor/core@8.4.1)
       '@capacitor/core':
         specifier: 8.4.1
         version: 8.4.1
       '@capacitor/ios':
         specifier: 8.4.1
         version: 8.4.1(@capacitor/core@8.4.1)
+      '@capacitor/keyboard':
+        specifier: 8.0.5
+        version: 8.0.5(@capacitor/core@8.4.1)
     devDependencies:
       '@capacitor/assets':
         specifier: 3.0.5
@@ -62,6 +68,11 @@ packages:
 
   '@capacitor/browser@8.0.4':
     resolution: {integrity: sha1-alHgOj9mkPrRvGOObaDDAkGAiKI=}
+    peerDependencies:
+      '@capacitor/core': '>=8.0.0'
+
+  '@capacitor/camera@8.2.2':
+    resolution: {integrity: sha1-WORVg9KqnLJLRLOmWv8AmrD1cbk=}
     peerDependencies:
       '@capacitor/core': '>=8.0.0'
 
@@ -1604,6 +1615,10 @@ snapshots:
       - typescript
 
   '@capacitor/browser@8.0.4(@capacitor/core@8.4.1)':
+    dependencies:
+      '@capacitor/core': 8.4.1
+
+  '@capacitor/camera@8.2.2(@capacitor/core@8.4.1)':
     dependencies:
       '@capacitor/core': 8.4.1
 

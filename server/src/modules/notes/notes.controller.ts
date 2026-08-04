@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Inject, Post, Put, Query, Req, Res } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Inject, Post, Put, Query, Req, Res } from '@nestjs/common';
 import { createReadStream, promises as fs } from 'node:fs';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { CreateFolderDto, DeleteNoteDto, SaveNoteDto } from './contracts/notes.dto.js';
@@ -64,6 +64,23 @@ export class NotesController {
     if (range === undefined) return headers.code(416).header('Content-Range', `bytes */${size}`).send();
     if (!range) return headers.header('Content-Length', size).send(createReadStream(asset.file));
     return headers.code(206).header('Content-Length', range.end - range.start + 1).header('Content-Range', `bytes ${range.start}-${range.end}/${size}`).send(createReadStream(asset.file, range));
+  }
+
+  @Post('files/images')
+  async uploadImage(@Req() request: FastifyRequest) {
+    let sourcePath = '';
+    let image: { data: Buffer; filename: string; mimetype: string } | null = null;
+    for await (const part of request.parts()) {
+      if (part.type === 'field') {
+        if (part.fieldname === 'sourcePath' && typeof part.value === 'string') sourcePath = part.value;
+        continue;
+      }
+      if (part.fieldname !== 'file' || image) throw new BadRequestException('只能上传一张图片');
+      image = { data: await part.toBuffer(), filename: part.filename, mimetype: part.mimetype };
+    }
+    if (!sourcePath) throw new BadRequestException('缺少当前文档路径');
+    if (!image?.data.length) throw new BadRequestException('缺少图片文件');
+    return this.notes.uploadImage(sourcePath, image);
   }
 
   @Get('search')

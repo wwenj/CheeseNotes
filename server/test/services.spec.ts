@@ -104,6 +104,32 @@ describe('真实 Git working tree', () => {
     database.db.close();
   });
 
+  it('上传图片写入文档同级 assets、更新索引并为重名文件追加序号', async () => {
+    const { database, workspace, notes } = await fixture();
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+
+    const first = await notes.uploadImage('文章.md', { data: png, filename: '封面.png', mimetype: 'image/png' });
+    const second = await notes.uploadImage('文章.md', { data: png, filename: '封面.png', mimetype: 'image/png' });
+    const markdownSafe = await notes.uploadImage('文章.md', { data: png, filename: '封面 #1 (最终).png', mimetype: 'image/png' });
+
+    expect(first.path).toBe('assets/封面.png');
+    expect(second.path).toBe('assets/封面-2.png');
+    expect(markdownSafe.path).toBe('assets/封面-1-最终.png');
+    expect(await readFile(workspace.file(first.path))).toEqual(png);
+    expect(workspace.indexByPath(first.path)).toMatchObject({ id: first.id, revision: first.revision, kind: 'png' });
+    expect((await notes.tree()).folders).toContain('assets');
+    database.db.close();
+  });
+
+  it('拒绝扩展名、MIME 与真实图片内容不一致的上传', async () => {
+    const { database, workspace, notes } = await fixture();
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+    await expect(notes.uploadImage('文章.md', { data: png, filename: '../伪装.jpg', mimetype: 'image/jpeg' })).rejects.toThrow('图片内容、扩展名或 MIME 类型不匹配');
+    expect(workspace.indexByPath('assets/伪装.jpg')).toBeUndefined();
+    database.db.close();
+  });
+
   it('重置会清空本地工作区和仓库绑定，等待重新选择', async () => {
     const { database, repository, sync, workspace } = await fixture();
     await writeFile(join(workspace.root, '中断的本地文件.md'), '# 临时内容');

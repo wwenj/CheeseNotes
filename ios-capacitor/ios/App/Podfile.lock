@@ -6,17 +6,26 @@ PODS:
     - CapacitorCordova
   - CapacitorBrowser (8.0.4):
     - Capacitor
+  - CapacitorCamera (8.2.2):
+    - Capacitor
+    - IONCameraLib (~> 1.0.5)
   - CapacitorCordova (8.4.1)
+  - CapacitorKeyboard (8.0.5):
+    - Capacitor
+  - IONCameraLib (1.0.5)
   - KeychainSwift (21.0.0)
 
 DEPENDENCIES:
   - "AparajitaCapacitorSecureStorage (from `../../node_modules/.pnpm/@aparajita+capacitor-secure-storage@8.0.0/node_modules/@aparajita/capacitor-secure-storage`)"
   - "Capacitor (from `../../node_modules/.pnpm/@capacitor+ios@8.4.1_@capacitor+core@8.4.1/node_modules/@capacitor/ios`)"
   - "CapacitorBrowser (from `../../node_modules/.pnpm/@capacitor+browser@8.0.4_@capacitor+core@8.4.1/node_modules/@capacitor/browser`)"
+  - "CapacitorCamera (from `../../node_modules/.pnpm/@capacitor+camera@8.2.2_@capacitor+core@8.4.1/node_modules/@capacitor/camera`)"
   - "CapacitorCordova (from `../../node_modules/.pnpm/@capacitor+ios@8.4.1_@capacitor+core@8.4.1/node_modules/@capacitor/ios`)"
+  - "CapacitorKeyboard (from `../../node_modules/.pnpm/@capacitor+keyboard@8.0.5_@capacitor+core@8.4.1/node_modules/@capacitor/keyboard`)"
 
 SPEC REPOS:
   trunk:
+    - IONCameraLib
     - KeychainSwift
 
 EXTERNAL SOURCES:
@@ -26,16 +35,23 @@ EXTERNAL SOURCES:
     :path: "../../node_modules/.pnpm/@capacitor+ios@8.4.1_@capacitor+core@8.4.1/node_modules/@capacitor/ios"
   CapacitorBrowser:
     :path: "../../node_modules/.pnpm/@capacitor+browser@8.0.4_@capacitor+core@8.4.1/node_modules/@capacitor/browser"
+  CapacitorCamera:
+    :path: "../../node_modules/.pnpm/@capacitor+camera@8.2.2_@capacitor+core@8.4.1/node_modules/@capacitor/camera"
   CapacitorCordova:
     :path: "../../node_modules/.pnpm/@capacitor+ios@8.4.1_@capacitor+core@8.4.1/node_modules/@capacitor/ios"
+  CapacitorKeyboard:
+    :path: "../../node_modules/.pnpm/@capacitor+keyboard@8.0.5_@capacitor+core@8.4.1/node_modules/@capacitor/keyboard"
 
 SPEC CHECKSUMS:
   AparajitaCapacitorSecureStorage: 8128d05cafcb13b00448e20fb388a0edccd44b12
   Capacitor: 35242afe195b1e53c58ca1b827d1b444c5e6602b
   CapacitorBrowser: 752e0208aa07c7aa63d1f7cde895a3e9519b2656
+  CapacitorCamera: a8e5798460aa967d0636d34d3a0bf1f69a5b5a39
   CapacitorCordova: eebe6bcf807b1b06f3f48237650f96bbcd0eef09
+  CapacitorKeyboard: b6b0744890cdb1d9a96e2cafcc9253fdcc55de3b
+  IONCameraLib: ecbd8ef0077d481df429cee267bbeb1a7b9bddd0
   KeychainSwift: 4a71a45c802fd9e73906457c2dcbdbdc06c9419d
 
-PODFILE CHECKSUM: 418a5b35f15d7c2f5dafd49cd5453bdbf1dc9155
+PODFILE CHECKSUM: 06faccc1e853cc99ae6581b776806743ebf59cad
 
 COCOAPODS: 1.17.0

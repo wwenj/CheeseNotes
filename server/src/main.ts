@@ -3,6 +3,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 import fastifyStatic from '@fastify/static';
+import fastifyMultipart from '@fastify/multipart';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { existsSync, promises as fs } from 'node:fs';
 import { extname, resolve } from 'node:path';
@@ -24,6 +25,9 @@ const assetContentTypes: Record<string, string> = {
 
 async function bootstrap() {
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter({ logger: true }), { rawBody: true });
+  await app.register(fastifyMultipart, {
+    limits: { fileSize: 25 * 1024 * 1024, files: 1, fields: 1, parts: 2 },
+  });
   app.enableShutdownHooks();
   app.setGlobalPrefix('api');
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true }));

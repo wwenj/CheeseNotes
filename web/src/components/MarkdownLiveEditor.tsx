@@ -1,8 +1,8 @@
-import { useEffect, useRef } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
-import { Compartment, EditorState, Range } from '@codemirror/state';
+import { Compartment, EditorSelection, EditorState, Range } from '@codemirror/state';
 import { tags } from '@lezer/highlight';
 import { Decoration, EditorView, keymap, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { notesApi, type NoteSummary } from '../api';
@@ -12,6 +12,17 @@ import { cachedAssetSource } from '../lib/workspace-cache';
 type MarkerRange = { from: number; to: number };
 type ImagePreview = { alt: string; src: string };
 type ImageLine = ImagePreview & { from: number; to: number };
+export type MarkdownCommand =
+  | { type: 'heading'; level: 1 | 2 | 3 | 4 }
+  | { type: 'bold' | 'link' | 'quote' | 'unordered-list' | 'inline-code' };
+
+export type MarkdownLiveEditorHandle = {
+  execute: (command: MarkdownCommand) => void;
+  createInsertionAnchor: () => void;
+  insertAtAnchor: (value: string) => void;
+  cancelInsertionAnchor: () => void;
+  focus: () => void;
+};
 export type LiveListMarker = {
   kind: 'unordered' | 'ordered' | 'task';
   level: number;
@@ -350,9 +361,84 @@ function modeExtensions(sourcePath: string, files: NoteSummary[]) {
   return [liveEditorTheme, syntaxHighlighting(markdownHighlighting), livePreviewExtension(sourcePath, files)];
 }
 
-export default function MarkdownLiveEditor({ content, sourcePath, files, onChange, onSave }: { content: string; sourcePath: string; files: NoteSummary[]; onChange: (content: string) => void; onSave: () => void }) {
+function finishCommand(view: EditorView) {
+  if (!view.dom.isConnected) return;
+  view.focus();
+  view.dispatch({ effects: EditorView.scrollIntoView(view.state.selection.main.head) });
+}
+
+function wrapSelection(view: EditorView, before: string, after: string, cursor: 'inside' | 'after' = 'inside') {
+  const selection = view.state.selection.main;
+  const selected = view.state.sliceDoc(selection.from, selection.to);
+  const insert = `${before}${selected}${after}`;
+  const anchor = selection.from + before.length;
+  const head = selected && cursor === 'inside' ? anchor + selected.length : cursor === 'after' ? selection.from + insert.length : anchor;
+  view.dispatch({
+    changes: { from: selection.from, to: selection.to, insert },
+    selection: EditorSelection.range(anchor, head),
+  });
+  finishCommand(view);
+}
+
+function selectedLines(view: EditorView) {
+  const selection = view.state.selection.main;
+  const first = view.state.doc.lineAt(selection.from);
+  const lastPosition = selection.to > selection.from && selection.to === view.state.doc.lineAt(selection.to).from ? selection.to - 1 : selection.to;
+  const last = view.state.doc.lineAt(Math.max(selection.from, lastPosition));
+  return Array.from({ length: last.number - first.number + 1 }, (_, index) => view.state.doc.line(first.number + index));
+}
+
+function toggleLinePrefix(view: EditorView, kind: 'quote' | 'unordered-list') {
+  const lines = selectedLines(view);
+  const pattern = kind === 'quote' ? /^(\s*)>\s?/ : /^(\s*)[-*+]\s+/;
+  const prefix = kind === 'quote' ? '> ' : '- ';
+  const nonEmpty = lines.filter((line) => line.text.trim());
+  const remove = nonEmpty.length > 0 && nonEmpty.every((line) => pattern.test(line.text));
+  const changes = lines.flatMap((line) => {
+    if (!line.text.trim()) return [];
+    const match = line.text.match(pattern);
+    if (remove && match) return [{ from: line.from + match[1].length, to: line.from + match[0].length, insert: '' }];
+    const indentation = line.text.match(/^\s*/)?.[0].length ?? 0;
+    return [{ from: line.from + indentation, insert: prefix }];
+  });
+  if (changes.length) view.dispatch({ changes });
+  finishCommand(view);
+}
+
+function applyHeading(view: EditorView, level: 1 | 2 | 3 | 4) {
+  const prefix = `${'#'.repeat(level)} `;
+  const changes = selectedLines(view).map((line) => {
+    const match = line.text.match(/^(\s*)(?:#{1,6}\s+)?/)!;
+    return { from: line.from + match[1].length, to: line.from + match[0].length, insert: prefix };
+  });
+  view.dispatch({ changes });
+  finishCommand(view);
+}
+
+export function executeMarkdownCommand(view: EditorView, command: MarkdownCommand) {
+  if (command.type === 'heading') return applyHeading(view, command.level);
+  if (command.type === 'quote' || command.type === 'unordered-list') return toggleLinePrefix(view, command.type);
+  if (command.type === 'bold') return wrapSelection(view, '**', '**');
+  if (command.type === 'link') {
+    const selection = view.state.selection.main;
+    const selected = view.state.sliceDoc(selection.from, selection.to);
+    const insert = `[${selected}]()`;
+    const cursor = selected ? selection.from + selected.length + 3 : selection.from + 1;
+    view.dispatch({ changes: { from: selection.from, to: selection.to, insert }, selection: { anchor: cursor } });
+    return finishCommand(view);
+  }
+  const selection = view.state.selection.main;
+  const selected = view.state.sliceDoc(selection.from, selection.to);
+  if (!selected.includes('\n')) return wrapSelection(view, '`', '`');
+  const insert = selected.split('\n').map((line) => `\`${line}\``).join('\n');
+  view.dispatch({ changes: { from: selection.from, to: selection.to, insert }, selection: EditorSelection.range(selection.from, selection.from + insert.length) });
+  finishCommand(view);
+}
+
+const MarkdownLiveEditor = forwardRef<MarkdownLiveEditorHandle, { content: string; sourcePath: string; files: NoteSummary[]; onChange: (content: string) => void; onSave: () => void }>(function MarkdownLiveEditor({ content, sourcePath, files, onChange, onSave }, ref) {
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<EditorView | null>(null);
+  const insertionAnchor = useRef<number | null>(null);
   const modeCompartment = useRef(new Compartment());
   const onChangeRef = useRef(onChange);
   const onSaveRef = useRef(onSave);
@@ -371,7 +457,11 @@ export default function MarkdownLiveEditor({ content, sourcePath, files, onChang
         EditorView.contentAttributes.of({ inputmode: 'text' }),
         keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab, { key: 'Mod-s', run: () => { onSaveRef.current(); return true; } }]),
         EditorView.lineWrapping,
-        EditorView.updateListener.of((update) => { if (update.docChanged) onChangeRef.current(update.state.doc.toString()); }),
+        EditorView.updateListener.of((update) => {
+          if (!update.docChanged) return;
+          if (insertionAnchor.current !== null) insertionAnchor.current = update.changes.mapPos(insertionAnchor.current, 1);
+          onChangeRef.current(update.state.doc.toString());
+        }),
         modeCompartment.current.of(modeExtension),
       ],
     });
@@ -393,5 +483,22 @@ export default function MarkdownLiveEditor({ content, sourcePath, files, onChang
     view.dispatch({ effects: modeCompartment.current.reconfigure(modeExtensions(sourcePath, files)) });
   }, [sourcePath, files]);
 
+  useImperativeHandle(ref, () => ({
+    execute: (command) => { if (editor.current) executeMarkdownCommand(editor.current, command); },
+    createInsertionAnchor: () => { insertionAnchor.current = editor.current?.state.selection.main.head ?? null; },
+    insertAtAnchor: (value) => {
+      const view = editor.current;
+      if (!view) return;
+      const position = Math.min(insertionAnchor.current ?? view.state.selection.main.head, view.state.doc.length);
+      insertionAnchor.current = null;
+      view.dispatch({ changes: { from: position, insert: value }, selection: { anchor: position + value.length } });
+      finishCommand(view);
+    },
+    cancelInsertionAnchor: () => { insertionAnchor.current = null; editor.current?.focus(); },
+    focus: () => { editor.current?.focus(); },
+  }), []);
+
   return <div className="markdown-live-editor is-write" ref={host} aria-label="文章写作编辑器" />;
-}
+});
+
+export default MarkdownLiveEditor;

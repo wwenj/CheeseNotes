@@ -24,12 +24,12 @@
                             <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="芝士 就是力量" textAlignment="center" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" minimumScaleFactor="0.9" adjustsFontSizeToFit="YES" translatesAutoresizingMaskIntoConstraints="NO" id="ZO0-8d-R0I">
                                 <rect key="frame" x="88.5" y="407.5" width="198" height="38"/>
                                 <fontDescription key="fontDescription" type="system" weight="bold" pointSize="32"/>
-                                <color key="textColor" red="0.1882352941" green="0.1647058824" blue="0.1176470588" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+                                <color key="textColor" red="0.2901960784" green="0.2078431373" blue="0.07843137255" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
                                 <nil key="highlightedColor"/>
                             </label>
                         </subviews>
                         <viewLayoutGuide key="safeArea" id="Bcu-3y-Kbp"/>
-                        <color key="backgroundColor" red="0.9960784314" green="0.9921568627" blue="0.9921568627" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+                        <color key="backgroundColor" red="1" green="0.9725490196" blue="0.8862745098" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
                         <constraints>
                             <constraint firstItem="jC9-zf-vGh" firstAttribute="leading" secondItem="Ze5-6b-2t3" secondAttribute="leading" id="0gN-jL-gcC"/>
                             <constraint firstAttribute="trailing" secondItem="jC9-zf-vGh" secondAttribute="trailing" id="3Aq-0W-OBF"/>

@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@fastify/multipart':
+        specifier: 10.1.0
+        version: 10.1.0
       '@fastify/static':
         specifier: ^8.3.0
         version: 8.3.0
@@ -237,8 +240,14 @@ packages:
   '@fastify/ajv-compiler@4.0.5':
     resolution: {integrity: sha1-/bCIenr1GrqujBgp6AmdNPjd0wI=}
 
+  '@fastify/busboy@3.2.0':
+    resolution: {integrity: sha1-E+2CEvO5uml2EVKdFTR/hSgFjOo=}
+
   '@fastify/cors@11.2.0':
     resolution: {integrity: sha1-gsR6/5vX39QKwKZvzYegNBE9zdg=}
+
+  '@fastify/deepmerge@3.2.1':
+    resolution: {integrity: sha1-D+VqTuPuyHRVYAZDn3vH1hbxDcE=}
 
   '@fastify/error@4.2.0':
     resolution: {integrity: sha1-1A9GunX1Qf3MTcJ2tzCLvI6ObXo=}
@@ -254,6 +263,9 @@ packages:
 
   '@fastify/merge-json-schemas@0.2.1':
     resolution: {integrity: sha1-OqMNLwyBqKxZlbbZTtTqosMFWCQ=}
+
+  '@fastify/multipart@10.1.0':
+    resolution: {integrity: sha1-78AQjrYKqExJLBw2eG9qn9jj/Mc=}
 
   '@fastify/proxy-addr@5.1.0':
     resolution: {integrity: sha1-9TYLXdg8fePUG0Fb5Kq4SuRKoQY=}
@@ -1404,10 +1416,14 @@ snapshots:
       ajv-formats: 3.0.1(ajv@8.20.0)
       fast-uri: 3.1.3
 
+  '@fastify/busboy@3.2.0': {}
+
   '@fastify/cors@11.2.0':
     dependencies:
       fastify-plugin: 5.1.0
       toad-cache: 3.7.4
+
+  '@fastify/deepmerge@3.2.1': {}
 
   '@fastify/error@4.2.0': {}
 
@@ -1425,6 +1441,14 @@ snapshots:
   '@fastify/merge-json-schemas@0.2.1':
     dependencies:
       dequal: 2.0.3
+
+  '@fastify/multipart@10.1.0':
+    dependencies:
+      '@fastify/busboy': 3.2.0
+      '@fastify/deepmerge': 3.2.1
+      '@fastify/error': 4.2.0
+      fastify-plugin: 6.0.0
+      secure-json-parse: 4.1.0
 
   '@fastify/proxy-addr@5.1.0':
     dependencies:

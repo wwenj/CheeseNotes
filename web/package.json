@@ -12,7 +12,9 @@
   "dependencies": {
     "@aparajita/capacitor-secure-storage": "^8.0.0",
     "@capacitor/browser": "8.0.4",
+    "@capacitor/camera": "8.2.2",
     "@capacitor/core": "8.4.1",
+    "@capacitor/keyboard": "8.0.5",
     "@codemirror/commands": "^6.10.4",
     "@codemirror/lang-markdown": "^6.5.0",
     "@codemirror/language": "^6.12.4",
