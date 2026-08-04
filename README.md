@@ -21,6 +21,26 @@ NoteAI 是一套以 iOS 使用体验为中心的个人笔记系统。它把 Mark
 - **同步结果可验证**：服务端在 push 后再次读取远端 ref；只有远端提交确实与预期一致，才会显示“已同步”。发生并发修改时保留冲突信息和处理入口，不把未确认状态伪装成成功。
 - **自部署但不牺牲可用性**：SQLite 只保存索引、同步状态、任务与必要凭据，笔记正文和附件保留在挂载的数据卷中的 Git 工作树；服务重启后仍可从 GitHub 恢复内容。
 
+## iOS 操作一览
+
+从 iPhone 主屏进入，启动后直接打开已连接的知识库。目录页展示 GitHub 确认状态；文章可在阅读与写作视图间切换，文件和同步设置集中管理。
+
+<table>
+  <tr>
+    <td width="50%" align="center"><img src="assets/screenshots/01-home-screen.jpg" alt="iPhone 主屏上的芝士 App" width="88%" /><br /><sub>从 iPhone 主屏进入</sub></td>
+    <td width="50%" align="center"><img src="assets/screenshots/02-launch-screen.jpg" alt="芝士启动页" width="88%" /><br /><sub>启动页</sub></td>
+  </tr>
+  <tr>
+    <td width="50%" align="center"><img src="assets/screenshots/03-library-sync.jpg" alt="知识库目录与 GitHub 同步状态" width="88%" /><br /><sub>知识库目录与同步状态</sub></td>
+    <td width="50%" align="center"><img src="assets/screenshots/04-reading.jpg" alt="Markdown 文章阅读视图" width="88%" /><br /><sub>Markdown 阅读视图</sub></td>
+  </tr>
+  <tr>
+    <td width="33.33%" align="center"><img src="assets/screenshots/05-settings.jpg" alt="设置与 Authenticator 验证" width="88%" /><br /><sub>仓库、同步与 Authenticator 设置</sub></td>
+    <td width="33.33%" align="center"><img src="assets/screenshots/06-document-actions.jpg" alt="文章操作菜单" width="88%" /><br /><sub>阅读、写作与文件操作</sub></td>
+    <td width="33.33%" align="center"><img src="assets/screenshots/07-writing.jpg" alt="Markdown 写作视图" width="88%" /><br /><sub>原生键盘下的 Markdown 写作</sub></td>
+  </tr>
+</table>
+
 ## 设计概览
 
 ```text

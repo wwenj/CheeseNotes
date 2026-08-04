@@ -158,12 +158,13 @@ describe('真实 Git working tree', () => {
   });
 
   it('clone 后从工作区读取，并把标题改名与内容作为标准 Git commit push', async () => {
-    const { remote, database, sync, notes } = await fixture();
+    const { remote, database, processGit, sync, notes } = await fixture();
     const opened = await notes.content('文章.md');
     expect(opened.content).toContain('初始内容');
 
     const saved = await notes.save(opened.path, '# 新标题\n\n修改后的正文', opened.revision, opened.id);
     expect(saved.path).toBe('新标题.md');
+    const gitRun = vi.spyOn(processGit, 'run');
     sync.triggerSync();
     await waitFor(sync, (status) => status.state === 'verified' && status.dirtyCount === 0);
 
@@ -172,6 +173,8 @@ describe('真实 Git working tree', () => {
     const row = database.db.prepare('SELECT path,revision FROM file_index WHERE id=?').get(opened.id) as { path: string; revision: string };
     expect(row.path).toBe('新标题.md');
     expect(row.revision).toBe(saved.revision);
+    expect(gitRun.mock.calls.find(([args]) => args[0] === 'fetch')?.[1]).toMatchObject({ timeout: 2 * 60 * 60_000 });
+    expect(gitRun.mock.calls.find(([args]) => args[0] === 'push')?.[1]).toMatchObject({ timeout: 2 * 60 * 60_000 });
     database.db.close();
   });
 

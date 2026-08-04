@@ -29,7 +29,7 @@ export type ManagementCommit = {
 
 type JobType = 'sync' | 'management';
 const quietSyncDelay = 10 * 60_000;
-const cloneTimeout = 2 * 60 * 60_000;
+const gitTransferTimeout = 2 * 60 * 60_000;
 
 @Injectable()
 export class SyncService implements OnModuleInit {
@@ -279,7 +279,7 @@ export class SyncService implements OnModuleInit {
       await this.workspace.clear();
       if (remoteHead) {
         this.setState({ state: 'checking', phase: 'cloning' });
-        await this.git.run(['clone', '--depth=1', '--single-branch', '--no-tags', '--branch', branch, '--', cloneUrl, this.workspace.root], { cwd: this.workspace.jobsRoot, token, timeout: cloneTimeout });
+        await this.git.run(['clone', '--depth=1', '--single-branch', '--no-tags', '--branch', branch, '--', cloneUrl, this.workspace.root], { cwd: this.workspace.jobsRoot, token, timeout: gitTransferTimeout });
       } else {
         await fs.mkdir(this.workspace.root, { recursive: true });
         await this.git.run(['init', `--initial-branch=${branch}`], { cwd: this.workspace.root });
@@ -477,7 +477,7 @@ export class SyncService implements OnModuleInit {
     const branch = this.repository.branch();
     const token = this.github.accessToken();
     const remote = await this.lsRemote(branch, token);
-    if (remote) await this.git.run(['fetch', '--no-tags', 'origin', `refs/heads/${branch}:refs/remotes/origin/${branch}`], { cwd: this.workspace.root, token });
+    if (remote) await this.git.run(['fetch', '--no-tags', 'origin', `refs/heads/${branch}:refs/remotes/origin/${branch}`], { cwd: this.workspace.root, token, timeout: gitTransferTimeout });
     return remote;
   }
 
@@ -485,7 +485,7 @@ export class SyncService implements OnModuleInit {
     const branch = this.repository.branch();
     const token = this.github.accessToken();
     try {
-      await this.git.run(['push', 'origin', `HEAD:refs/heads/${branch}`], { cwd: this.workspace.root, token });
+      await this.git.run(['push', 'origin', `HEAD:refs/heads/${branch}`], { cwd: this.workspace.root, token, timeout: gitTransferTimeout });
     } catch (reason) {
       const actual = await this.lsRemote(branch, token).catch(() => '');
       if (actual === candidate) return;
@@ -626,7 +626,7 @@ export class SyncService implements OnModuleInit {
         }
         const remote = this.repository.branch() && this.github.hasToken() ? await this.lsRemote(this.repository.branch(), this.github.accessToken()) : '';
         if (candidate && remote) {
-          await this.git.run(['fetch', '--no-tags', 'origin', `refs/heads/${this.repository.branch()}:refs/remotes/origin/${this.repository.branch()}`], { cwd: this.workspace.root, token: this.github.accessToken() });
+          await this.git.run(['fetch', '--no-tags', 'origin', `refs/heads/${this.repository.branch()}:refs/remotes/origin/${this.repository.branch()}`], { cwd: this.workspace.root, token: this.github.accessToken(), timeout: gitTransferTimeout });
           const contained = remote === candidate || await this.git.run(['merge-base', '--is-ancestor', candidate, remote], { cwd: this.workspace.root }).then(() => true).catch(() => false);
           if (contained) {
             await this.git.run(['reset', '--hard', remote], { cwd: this.workspace.root });
