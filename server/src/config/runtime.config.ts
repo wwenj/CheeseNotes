@@ -6,10 +6,21 @@ type GitTransport = 'https' | 'ssh';
 type GitHubOAuthSettings = {
   clientId: string;
   clientSecret: string;
-  gitTransport?: GitTransport;
+  gitTransport: GitTransport;
 };
 
-type GitHubOAuthSettingsFile = Record<'development' | 'production', GitHubOAuthSettings>;
+type EnvironmentSettings = {
+  webOrigin: string;
+  serviceOrigin: string;
+  corsOrigins: string[];
+  dataRoot: string;
+  host: string;
+  port: number;
+  authenticatorSecret: string;
+  githubOAuth: GitHubOAuthSettings;
+};
+
+type RuntimeSettingsFile = Record<'development' | 'production', EnvironmentSettings>;
 
 export type RuntimeConfig = {
   dataRoot: string;
@@ -22,9 +33,10 @@ export type RuntimeConfig = {
   githubOAuthClientSecret: string;
   githubOAuthCallbackUrl: string;
   corsOrigins: string[];
+  authenticatorSecret: string;
 };
 
-const githubOAuthConfigPath = () => resolve(process.cwd(), 'config', 'github-oauth.local.json');
+const runtimeConfigPath = () => resolve(process.cwd(), 'config', 'runtime.local.json');
 
 const gitTransport = (settings: GitHubOAuthSettings, environment: string): GitTransport => {
   const value = settings.gitTransport ?? 'https';
@@ -32,65 +44,68 @@ const gitTransport = (settings: GitHubOAuthSettings, environment: string): GitTr
   throw new Error(`GitHub OAuth ${environment} 配置中的 gitTransport 只能是 https 或 ssh。`);
 };
 
-const requiredSetting = (settings: GitHubOAuthSettings, key: keyof GitHubOAuthSettings, environment: string) => {
+const requiredSetting = (settings: Record<string, unknown>, key: string, environment: string) => {
   const value = settings[key];
   if (typeof value !== 'string' || !value.trim()) throw new Error(`GitHub OAuth ${environment} 配置缺少 ${key}。`);
   return value.trim();
 };
 
-const requiredEnvironmentUrl = (name: 'NOTEAI_WEB_ORIGIN' | 'NOTEAI_SERVICE_ORIGIN') => {
-  const value = process.env[name]?.trim();
-  if (!value) throw new Error(`缺少 ${name}；请在 config/.env.local 或部署环境中配置。`);
+const requiredUrl = (value: unknown, name: string, environment: string) => {
+  if (typeof value !== 'string' || !value.trim()) throw new Error(`${environment} 配置缺少 ${name}。`);
   let url: URL;
   try {
     url = new URL(value);
   } catch {
-    throw new Error(`${name} 必须是完整 URL。`);
+    throw new Error(`${environment} 配置中的 ${name} 必须是完整 URL。`);
   }
-  if (!['http:', 'https:'].includes(url.protocol)) throw new Error(`${name} 必须使用 http 或 https。`);
+  if (!['http:', 'https:'].includes(url.protocol)) throw new Error(`${environment} 配置中的 ${name} 必须使用 http 或 https。`);
   return url.href.replace(/\/$/, '');
 };
 
-const githubOAuthSettings = (): GitHubOAuthSettings => {
+const runtimeSettings = (): EnvironmentSettings => {
   const environment = process.env.NODE_ENV === 'production' ? 'production' : 'development';
-  const path = githubOAuthConfigPath();
-  if (!existsSync(path)) throw new Error(`缺少 GitHub OAuth 本地配置文件：${path}`);
+  const path = runtimeConfigPath();
+  if (!existsSync(path)) throw new Error(`缺少服务端本地配置文件：${path}。请从 config/runtime.example.json 复制为 config/runtime.local.json 后填写。`);
 
-  let file: GitHubOAuthSettingsFile;
+  let file: RuntimeSettingsFile;
   try {
-    file = JSON.parse(readFileSync(path, 'utf8')) as GitHubOAuthSettingsFile;
+    file = JSON.parse(readFileSync(path, 'utf8')) as RuntimeSettingsFile;
   } catch (reason) {
     const message = reason instanceof Error ? reason.message : '未知错误';
-    throw new Error(`无法读取 GitHub OAuth 本地配置文件：${message}`);
+    throw new Error(`无法读取服务端本地配置文件：${message}`);
   }
 
   const settings = file[environment];
-  if (!settings) throw new Error(`GitHub OAuth 本地配置缺少 ${environment} 环境。`);
-  return {
-    clientId: requiredSetting(settings, 'clientId', environment),
-    clientSecret: requiredSetting(settings, 'clientSecret', environment),
-    gitTransport: gitTransport(settings, environment),
-  };
+  if (!settings) throw new Error(`服务端本地配置缺少 ${environment} 环境。`);
+  return settings;
 };
 
 export const runtimeConfig = (): RuntimeConfig => {
-  const oauth = githubOAuthSettings();
-  const webOrigin = requiredEnvironmentUrl('NOTEAI_WEB_ORIGIN');
-  const serviceOrigin = requiredEnvironmentUrl('NOTEAI_SERVICE_ORIGIN');
-  const corsOriginSetting = process.env.CORS_ORIGINS ?? 'capacitor://localhost';
-  const corsOrigins = [...new Set([new URL(webOrigin).origin, ...corsOriginSetting.split(',').map((value) => value.trim()).filter(Boolean)])];
+  const environment = process.env.NODE_ENV === 'production' ? 'production' : 'development';
+  const settings = runtimeSettings();
+  const oauth = settings.githubOAuth;
+  if (!oauth || typeof oauth !== 'object') throw new Error(`${environment} 配置缺少 githubOAuth。`);
+  const webOrigin = requiredUrl(settings.webOrigin, 'webOrigin', environment);
+  const serviceOrigin = requiredUrl(settings.serviceOrigin, 'serviceOrigin', environment);
+  if (!Array.isArray(settings.corsOrigins) || settings.corsOrigins.some((origin) => typeof origin !== 'string' || !origin.trim())) {
+    throw new Error(`${environment} 配置中的 corsOrigins 必须是非空字符串数组。`);
+  }
+  if (typeof settings.dataRoot !== 'string' || !settings.dataRoot.trim()) throw new Error(`${environment} 配置缺少 dataRoot。`);
+  if (typeof settings.host !== 'string' || !settings.host.trim()) throw new Error(`${environment} 配置缺少 host。`);
+  if (!Number.isInteger(settings.port) || settings.port < 1 || settings.port > 65535) throw new Error(`${environment} 配置中的 port 必须是 1 到 65535 的整数。`);
+  const authenticatorSecret = requiredSetting(settings, 'authenticatorSecret', environment);
+  const corsOrigins = [...new Set([new URL(webOrigin).origin, ...settings.corsOrigins.map((value) => value.trim())])];
   return {
-    dataRoot: process.env.NOTEAI_DATA_ROOT
-      ? resolve(process.env.NOTEAI_DATA_ROOT)
-      : existsSync('/.dockerenv') ? '/var/lib/note-service' : resolve(process.cwd(), '..', '.runtime'),
-    gitTransport: oauth.gitTransport ?? 'https',
+    dataRoot: resolve(process.cwd(), settings.dataRoot),
+    gitTransport: gitTransport(oauth, environment),
     serviceDir: 'note-service',
-    port: Number(process.env.PORT || 3000),
-    host: process.env.HOST || '0.0.0.0',
+    port: settings.port,
+    host: settings.host.trim(),
     webOrigin,
-    githubOAuthClientId: oauth.clientId,
-    githubOAuthClientSecret: oauth.clientSecret,
+    githubOAuthClientId: requiredSetting(oauth, 'clientId', environment),
+    githubOAuthClientSecret: requiredSetting(oauth, 'clientSecret', environment),
     githubOAuthCallbackUrl: `${serviceOrigin}/api/auth/github/callback`,
     corsOrigins,
+    authenticatorSecret,
   };
 };

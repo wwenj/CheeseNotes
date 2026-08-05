@@ -25,7 +25,7 @@ pnpm ios:assets
 
 ## 本地启动
 
-先启动后端。Capacitor 内置 WebView 的 `capacitor://localhost` 已是服务端默认允许的 CORS origin。GitHub OAuth 凭据从 `server/config/github-oauth.local.json` 读取；Web、服务端和 iOS 的地址均从仓库根目录 `config/.env.local` 读取：
+先启动后端。Capacitor 内置 WebView 的 `capacitor://localhost` 应保留在服务端 `server/config/runtime.local.json` 当前环境的 `corsOrigins` 中。GitHub OAuth 和服务端地址从该文件读取；iOS 打包服务地址从仓库根目录 `config/.env.local` 读取：
 
 ```bash
 cd /Users/zu/Desktop/Code/previte/NoteAI/server

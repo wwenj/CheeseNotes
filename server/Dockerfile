@@ -14,10 +14,12 @@ COPY --from=web-build /app/server/public ./public
 RUN npm run build
 FROM node:26-bookworm-slim
 WORKDIR /app
+ENV NODE_ENV=production
 RUN apt-get update \
   && apt-get install -y --no-install-recommends git ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/public ./public
-CMD ["node", "--env-file-if-exists=config/.env.local", "dist/src/main.js"]
+COPY --from=build /app/config ./config
+CMD ["node", "dist/src/main.js"]

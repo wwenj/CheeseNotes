@@ -54,7 +54,7 @@ CheeseNotes 服务端（NestJS + Fastify）
 
 ## 运行方式
 
-服务端需要 Node.js 与 pnpm。GitHub OAuth 凭据放在 `server/config/github-oauth.local.json`，服务端与 iOS 的地址配置放在 `config/.env.local`；两者均被 Git 忽略。分别从相邻的 `.example` 文件复制后填写，客户端不会接触 Client Secret。
+服务端需要 Node.js 与 pnpm。先按下方“私有化部署前配置”创建服务端配置；客户端不会接触 GitHub OAuth 的 Client Secret。
 
 ```bash
 cd server
@@ -67,6 +67,25 @@ npm run start:dev
 ```bash
 docker build -f server/Dockerfile -t cheesenotes .
 ```
+
+## 私有化部署前配置
+
+服务端全部手动配置统一在 [`server/config`](server/config/)。复制模板后填写，`runtime.local.json` 已被 Git 忽略，绝不能提交。
+
+```bash
+cp server/config/runtime.example.json server/config/runtime.local.json
+```
+
+配置文件同时包含 `development` 和 `production`；`NODE_ENV=production` 时读取后者，其他情况读取前者。部署前至少确认以下项：
+
+- `webOrigin`、`serviceOrigin`：用户访问的 Web 地址与服务端公开地址。GitHub OAuth App 的 Authorization callback URL 必须设为 `${serviceOrigin}/api/auth/github/callback`。
+- `corsOrigins`：额外允许的跨域来源；iOS App 保留 `capacitor://localhost`。
+- `dataRoot`：可写且持久化的数据目录。Docker 默认使用 `/var/lib/note-service`，必须挂载为持久卷。
+- `host`、`port`：服务监听地址与端口。
+- `authenticatorSecret`：唯一的 Base32 TOTP Secret，用于 Authenticator 验证和设备令牌签名；生产环境请重新生成，变更后所有已验证设备都需再次验证。
+- `githubOAuth.clientId`、`githubOAuth.clientSecret`：对应环境的 GitHub OAuth App 凭据；`gitTransport` 选 `https` 或 `ssh`。使用 `ssh` 时还需在运行服务的系统账户中配置 GitHub SSH 私钥与 `known_hosts`。
+
+Docker 镜像内包含模板文件。运行容器时将填写后的 `server/config` 挂载到 `/app/config`，并将数据卷挂载到配置中的 `dataRoot`。iOS 打包地址仍由仓库根目录 [`config/.env.local`](config/.env.example) 的 `NOTEAI_SERVICE_ORIGIN` 配置。
 
 ## iOS 开发
 

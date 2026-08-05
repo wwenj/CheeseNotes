@@ -11,7 +11,7 @@
 └── git-jobs/                   # snapshot ref、冲突三方文件和恢复状态
 ```
 
-本地开发可通过 `NOTEAI_DATA_ROOT` 覆盖目录，默认使用仓库根目录 `.runtime`。检测到旧 `meta/notes.sqlite` 时直接拒绝启动，不执行兼容读取或迁移。
+运行数据目录由 `server/config/runtime.local.json` 当前环境的 `dataRoot` 指定。检测到旧 `meta/notes.sqlite` 时直接拒绝启动，不执行兼容读取或迁移。
 
 ## 模块边界
 

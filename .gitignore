@@ -25,6 +25,7 @@ pnpm-debug.log*
 .env.*
 !.env.example
 !.env.*.example
+server/config/runtime.local.json
 server/config/github-oauth.local.json
 server/config/authenticator-secret.local.txt
 config/.env.local

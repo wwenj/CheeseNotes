@@ -13,6 +13,12 @@ import { PathPolicy } from '../src/modules/storage/path-policy.service.js';
 import { RepositoryWorkspaceService } from '../src/modules/storage/repository-workspace.service.js';
 import { SyncService } from '../src/modules/sync/sync.service.js';
 
+const runtimeState = vi.hoisted(() => ({ dataRoot: '' }));
+
+vi.mock('../src/config/runtime.config.js', () => ({
+  runtimeConfig: () => ({ dataRoot: runtimeState.dataRoot, gitTransport: 'https', serviceDir: 'note-service' }),
+}));
+
 const execute = promisify(execFile);
 const roots: string[] = [];
 
@@ -41,7 +47,7 @@ async function fixture(options: { empty?: boolean; repositoryError?: Error } = {
     await git(seed, 'push', 'origin', 'main');
   }
 
-  process.env.NOTEAI_DATA_ROOT = data;
+  runtimeState.dataRoot = data;
   const database = new DatabaseService();
   const paths = new PathPolicy();
   const processGit = new GitProcessService();
@@ -77,7 +83,7 @@ async function waitFor(sync: SyncService, predicate: (status: ReturnType<SyncSer
 }
 
 afterEach(async () => {
-  delete process.env.NOTEAI_DATA_ROOT;
+  runtimeState.dataRoot = '';
   while (roots.length) await rm(roots.pop()!, { recursive: true, force: true });
 });
 
@@ -496,7 +502,7 @@ describe('全新数据库切换', () => {
     roots.push(root);
     await mkdir(join(root, 'meta'), { recursive: true });
     await writeFile(join(root, 'meta', 'notes.sqlite'), 'legacy');
-    process.env.NOTEAI_DATA_ROOT = root;
+    runtimeState.dataRoot = root;
     expect(() => new DatabaseService()).toThrow('不迁移旧数据');
   });
 });

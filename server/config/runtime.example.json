@@ -1,0 +1,30 @@
+{
+  "development": {
+    "webOrigin": "http://localhost:5173",
+    "serviceOrigin": "http://localhost:3000",
+    "corsOrigins": ["capacitor://localhost"],
+    "dataRoot": "../.runtime",
+    "host": "0.0.0.0",
+    "port": 3000,
+    "authenticatorSecret": "REPLACE_WITH_A_UNIQUE_BASE32_TOTP_SECRET",
+    "githubOAuth": {
+      "clientId": "填写本地 OAuth App Client ID",
+      "clientSecret": "填写本地 OAuth App Client Secret",
+      "gitTransport": "https"
+    }
+  },
+  "production": {
+    "webOrigin": "https://notes.example.com",
+    "serviceOrigin": "https://notes.example.com",
+    "corsOrigins": ["capacitor://localhost"],
+    "dataRoot": "/var/lib/note-service",
+    "host": "0.0.0.0",
+    "port": 3000,
+    "authenticatorSecret": "REPLACE_WITH_A_DIFFERENT_UNIQUE_BASE32_TOTP_SECRET",
+    "githubOAuth": {
+      "clientId": "填写生产 OAuth App Client ID",
+      "clientSecret": "填写生产 OAuth App Client Secret",
+      "gitTransport": "https"
+    }
+  }
+}
