@@ -23,22 +23,27 @@ CheeseNotes（芝士笔记）是一套以 iOS 使用体验为中心的个人笔�
 
 ## iOS 操作一览
 
-从启动页进入已连接的知识库。目录页展示 GitHub 确认状态；文章可在阅读与写作视图间切换，文件和同步设置集中管理。
+从主屏进入，依次经过启动页与首页总览，随后打开已连接的知识库。目录页展示 GitHub 确认状态；文章可在阅读与写作视图间切换，文件和同步设置集中管理。
 
-<table>
-  <tr>
-    <td width="50%" align="center"><img src="assets/screenshots/02-launch-screen.jpg" alt="CheeseNotes 启动页" width="88%" /><br /><sub>启动页</sub></td>
-    <td width="50%" align="center"><img src="assets/screenshots/03-library-sync.jpg" alt="知识库目录与 GitHub 同步状态" width="88%" /><br /><sub>知识库目录与同步状态</sub></td>
-  </tr>
-  <tr>
-    <td width="50%" align="center"><img src="assets/screenshots/04-reading.jpg" alt="Markdown 文章阅读视图" width="88%" /><br /><sub>Markdown 阅读视图</sub></td>
-    <td width="50%" align="center"><img src="assets/screenshots/05-settings.jpg" alt="设置与 Authenticator 验证" width="88%" /><br /><sub>仓库、同步与 Authenticator 设置</sub></td>
-  </tr>
-  <tr>
-    <td width="50%" align="center"><img src="assets/screenshots/06-document-actions.jpg" alt="文章操作菜单" width="88%" /><br /><sub>阅读、写作与文件操作</sub></td>
-    <td width="50%" align="center"><img src="assets/screenshots/07-writing.jpg" alt="Markdown 写作视图" width="88%" /><br /><sub>原生键盘下的 Markdown 写作</sub></td>
-  </tr>
-</table>
+<p align="center">
+  <img src="assets/screenshots/01-app-entry.jpg" alt="iPhone 主屏上的 CheeseNotes" width="220" />
+  <img src="assets/screenshots/02-launch-screen.jpg" alt="CheeseNotes 启动页" width="220" />
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/03-dashboard.jpg" alt="CheeseNotes 首页总览" width="220" />
+  <img src="assets/screenshots/03-library-sync.jpg" alt="知识库目录与 GitHub 同步状态" width="220" />
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/04-reading.jpg" alt="Markdown 文章阅读视图" width="220" />
+  <img src="assets/screenshots/05-settings.jpg" alt="设置与 Authenticator 验证" width="220" />
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/06-document-actions.jpg" alt="文章操作菜单" width="220" />
+  <img src="assets/screenshots/07-writing.jpg" alt="Markdown 写作视图" width="220" />
+</p>
 
 ## 设计概览
 
