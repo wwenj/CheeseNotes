@@ -23,18 +23,18 @@ CheeseNotes（芝士笔记）是一套以 iOS 使用体验为中心的个人笔�
 
 ## iOS 操作一览
 
-从主屏进入、启动并打开首页；随后浏览知识库、阅读文章、管理设置，再切换到文件操作与写作。以下三组展示图以手机端真实界面为主体。
+从主屏进入、启动并打开首页；随后阅读、写作与管理文章，最后浏览知识库、调整设置并管理仓库同步。以下三组展示图均由真实手机截图直接合成。
 
 <p align="center">
-  <img src="assets/screenshots/ios-showcase-01.jpg" alt="从主屏、启动页到 CheeseNotes 首页总览" width="900" />
+  <img src="assets/screenshots/ios-showcase-01-source.png" alt="从主屏、启动页到 CheeseNotes 首页总览" width="900" />
 </p>
 
 <p align="center">
-  <img src="assets/screenshots/ios-showcase-02.jpg" alt="知识库目录、阅读视图与设置" width="900" />
+  <img src="assets/screenshots/ios-showcase-02-source.png" alt="阅读、Markdown 写作与文章操作" width="900" />
 </p>
 
 <p align="center">
-  <img src="assets/screenshots/ios-showcase-03.jpg" alt="文章操作与 Markdown 写作" width="900" />
+  <img src="assets/screenshots/ios-showcase-03-source.png" alt="知识库目录、设置与仓库同步" width="900" />
 </p>
 
 ## 设计概览
