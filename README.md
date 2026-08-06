@@ -52,54 +52,80 @@ CheeseNotes 服务端（NestJS + Fastify）
 用户自己的 GitHub 仓库
 ```
 
-## 运行方式
+## 本地运行
 
-服务端需要 Node.js 与 pnpm。先按下方“私有化部署前配置”创建服务端配置。
-
-```bash
-cd server
-pnpm install
-npm run start:dev
-```
-
-生产镜像可在仓库根目录构建。运行时请将持久卷挂载到 `/var/lib/note-service`，其中包含 SQLite 元数据、真实 Git 工作树及同步任务的恢复文件。
-
-```bash
-docker build -f server/Dockerfile -t cheesenotes .
-```
-
-## 私有化部署前配置
-
-部署前，复制服务端配置模板：
+先复制服务端配置模板：
 
 ```bash
 cp server/config/runtime.example.json server/config/runtime.local.json
 ```
 
-生产部署填写 `runtime.local.json` 的 `production` 配置，重点只需确认：
+编辑 `server/config/runtime.local.json`，只需替换 `development` 下的以下配置：
 
-- `webOrigin`、`serviceOrigin`：填写对外访问的 HTTPS 域名，例如 `https://notes.example.com`。 GitHub OAuth App 的回调地址填写为 `${serviceOrigin}/api/auth/github/callback`。
-- `authenticatorSecret`：填写 Authenticator App 使用的 Base32 TOTP Secret。
-- `githubOAuth.clientId`、`githubOAuth.clientSecret`：填写 GitHub OAuth App 凭据。
+- `authenticatorSecret`：Authenticator 使用的 Base32 TOTP Secret，用于生成和校验设备登录验证码。请自行生成独立密钥，将密钥配置到当前配置，下载手机 Authenticator 应用，将密钥添加到 Authenticator App，每次重新登录需要在 Authenticator App 中获取临时验证码登录。
+- `githubOAuth.clientId`：打开 https://github.com/settings/developers 新增 GitHub OAuth App ，填写 Client ID，并配置的到当前配置中。
+- `githubOAuth.clientSecret`：同样在 GitHub OAuth App 中配置 Client Secret，用于服务端完成 GitHub 授权，不能提交到 Git 仓库或泄露给客户端。
 
-构建并运行 Docker：
+需要生成本地、线上两个 OAuth App 对应两种 callback URL ，为 GitHub 授权后的回跳地址，本地环境设置为 `http://localhost:3000/api/auth/github/callback`，否则本地无法完成 GitHub 授权登录。
+
+分别启动服务端和 Web：
 
 ```bash
-docker build -f server/Dockerfile -t cheesenotes .
-docker run -d --name cheesenotes -p 3000:3000 \
-  -v "$(pwd)/server/config:/app/config:ro" \
-  -v cheesenotes-data:/var/lib/note-service \
-  cheesenotes
+cd server
+pnpm install
+pnpm start:dev
 ```
 
-如需打包 iOS App，再将根目录 `config/.env.local` 中的 `NOTEAI_SERVICE_ORIGIN` 改为同一个服务地址。
+```bash
+cd web
+pnpm install
+pnpm dev
+```
 
-## iOS 开发
+浏览器访问 `http://localhost:5173`。开发服务器会把 `/api` 请求代理到 `http://localhost:3000`。
+
+iOS 真机调试时，先复制配置模板：
+
+```bash
+cp config/.env.example config/.env.local
+```
+
+将 `config/.env.local` 中的 `NOTEAI_SERVICE_ORIGIN` 设置为线上服务地址，然后同步并打开 Xcode 工程：
 
 ```bash
 cd ios-capacitor
 pnpm install
 pnpm ios:sync
+pnpm ios:open
 ```
 
-`pnpm ios:sync:production` 会将生产服务地址写入独立的 iOS 打包副本，随后可在 Xcode 中打开 `ios/App/App.xcworkspace` 运行。
+在 Xcode 中设置 Signing Team，选择已连接的 iPhone 后直接运行即可。
+
+当前 iOS App 基于 Web 构建，`pnpm ios:sync` 会先完整构建 Web，再将产物打包进 iOS 工程；Web 代码修改后需要重新执行该命令。
+
+## 私有化部署
+
+填写 `server/config/runtime.local.json` 的 `production` 配置后，分别构建 Web 和服务端，再启动生产服务：
+
+```bash
+cd web
+pnpm install
+pnpm build
+
+cd ../server
+pnpm install
+pnpm build
+pnpm start
+```
+
+Web 构建产物会写入 `server/public`，由服务端统一托管。生产环境需要长期保持服务进程运行，并确保 `dataRoot` 指向的目录不会因发布或重启而丢失。线上建议通过 Nginx、Caddy 等反向代理提供 HTTPS，并将域名转发到服务端 `3000` 端口。
+
+打包 iOS App 前，将 `config/.env.local` 中的 `NOTEAI_SERVICE_ORIGIN` 设置为线上 HTTPS 服务地址，然后构建并打开 Xcode 工程：
+
+```bash
+cd ios-capacitor
+pnpm ios:sync:production
+pnpm ios:open
+```
+
+在 Xcode 中设置 Bundle Identifier、版本号和 Signing Team，选择 `Any iOS Device (arm64)`，再通过 `Product > Archive` 构建归档。归档完成后在 Organizer 中选择 `Distribute App > App Store Connect > Upload` 上传，最后到 App Store Connect 创建版本、填写应用信息并提交审核。发布到 App Store 或通过 TestFlight 分发需要加入付费的 Apple Developer Program。
